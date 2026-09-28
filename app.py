@@ -204,6 +204,31 @@ div[class*="st-key-card"]{background:#fff;border:1px solid var(--line);border-ra
 .stTabs [data-baseweb="tab-list"]{gap:2px;border-bottom:1px solid var(--line)}
 .stTabs [data-baseweb="tab"]{height:44px;padding:0 16px;font-weight:600;color:var(--mu)}
 .stTabs [aria-selected="true"]{color:var(--navy)}
+/* paksa tema terang agar teks tidak hilang saat HP memakai mode gelap */
+:root,.stApp{color-scheme:light}
+.stApp [data-testid="stMarkdownContainer"] p,.stApp [data-testid="stMarkdownContainer"] li,.stApp [data-testid="stMarkdownContainer"] td{color:var(--tx)}
+.stApp .hero p,.stApp .lg p{color:#C9D7EE}
+.stApp .lg li{color:#E4ECF9}
+.stApp .ann p{color:#475569}
+.stApp .ann small,.stApp .tugas-m,.stApp .cbody small,.stApp .profile span{color:var(--mu)}
+.stApp .ann b,.stApp .tugas-h b,.stApp .cbody b,.stApp .profile b{color:var(--navy)}
+.stApp label,.stApp [data-testid="stWidgetLabel"] p,.stApp [data-testid="stCaptionContainer"] *{color:var(--tx)}
+.stApp input,.stApp textarea,.stApp [data-baseweb="select"] *{color:var(--tx)!important}
+.stApp input,.stApp textarea,.stApp [data-baseweb="select"]>div,.stApp [data-baseweb="input"],.stApp [data-baseweb="textarea"]{background:#fff!important}
+[data-baseweb="popover"] *{color:var(--tx)}
+.block-container .stButton>button[kind="secondary"],.block-container .stDownloadButton>button{background:#fff;color:var(--navy);border:1px solid var(--line)}
+.block-container .stButton>button[kind="primary"],.block-container .stDownloadButton>button[kind="primary"],.block-container [data-testid="stFormSubmitButton"]>button{background:var(--blue);color:#fff;border:1px solid var(--blue)}
+.block-container .stButton>button[kind="primary"] *,.block-container [data-testid="stFormSubmitButton"]>button *{color:#fff}
+[data-testid="stExpander"] summary,[data-testid="stExpander"] summary *{color:var(--navy)}
+/* menu atas: tampil di HP, disembunyikan di layar lebar karena sudah ada sidebar */
+.st-key-topnav{background:#fff;border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:4px;padding:8px 12px;margin-bottom:14px}
+.st-key-topnav [role="radiogroup"]{gap:6px 14px;flex-wrap:wrap}
+@media(min-width:0px){.st-key-topnav{display:block}}
+section[data-testid="stSidebar"] .stButton>button,section[data-testid="stSidebar"] .stButton>button *{color:#DCE6F5!important}
+section[data-testid="stSidebar"] .stButton>button[kind="primary"],section[data-testid="stSidebar"] .stButton>button[kind="primary"] *{color:#fff!important}
+section[data-testid="stSidebar"] .sb-brand span,section[data-testid="stSidebar"] .sb-user span{color:#DCE6F5!important}
+[data-testid="stExpandSidebarButton"],[data-testid="stSidebarCollapsedControl"],[data-testid="collapsedControl"]{display:flex!important;visibility:visible!important;background:var(--navy);border-radius:4px}
+[data-testid="stExpandSidebarButton"] *,[data-testid="stSidebarCollapsedControl"] *,[data-testid="collapsedControl"] *{color:#fff!important}
 @media(max-width:640px){.block-container{padding:3rem 1rem 2rem}.hero .rt{text-align:left}}
 """
 
@@ -925,6 +950,9 @@ def siswa_home(u):
         isi = "".join(f'<div class="ann"><small>Batas kumpul {fmt(r.deadline)}</small><b>{esc(r.judul)}</b><p>{esc(r.mapel)}</p></div>'
                       for r in up.itertuples())
         H(panel("Tugas yang perlu dikumpulkan", isi or '<div class="empty">Tidak ada tugas yang menunggu.</div>'))
+        if st.button("📚 Buka halaman kumpul tugas", type="primary", key="ke_tugas"):
+            st.session_state["menu"] = "📚 Tugas saya"
+            st.rerun()
     with b:
         hari = today().weekday()
         jd = [(s, m, pg.get(m, "-")) for s, m, _ in jadwal(kelas, hari)] if hari < 5 else []
@@ -1241,6 +1269,17 @@ PAGES = {
 }
 
 
+def navbar_atas(u, aktif):
+    """Menu di halaman utama, supaya tetap terlihat di HP saat sidebar tertutup."""
+    menu = list(PAGES[u["role"]])
+    with st.container(key="topnav"):
+        pilih = st.radio("Menu", menu, index=menu.index(aktif), horizontal=True,
+                         label_visibility="collapsed", key=f"topnav_{aktif}")
+    if pilih != aktif:
+        st.session_state["menu"] = pilih
+        st.rerun()
+
+
 def main():
     pasang_css()
     init_db()
@@ -1249,6 +1288,7 @@ def main():
         halaman_login()
         return
     aktif = sidebar(u)
+    navbar_atas(u, aktif)
     tampil_flash()
     PAGES[u["role"]][aktif](u)
 
