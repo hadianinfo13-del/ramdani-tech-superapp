@@ -10,6 +10,7 @@ import hmac
 import html as _html
 import inspect
 import io
+import json
 import os
 import random
 import re
@@ -27,6 +28,12 @@ try:
     import google.generativeai as genai
 except Exception:  # paket belum terpasang
     genai = None
+try:
+    import streamlit.components.v1 as components
+    from streamlit_geolocation import streamlit_geolocation
+except Exception:  # paket lokasi belum terpasang
+    streamlit_geolocation = None
+    import streamlit.components.v1 as components
 
 st.set_page_config(page_title="LMS SMP Negeri 1 Cijambe", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
 try:  # cadangan bila .streamlit/config.toml belum dipasang
@@ -51,6 +58,8 @@ HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 BLN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 STATUS_HADIR = ["Hadir", "Sakit", "Izin", "Alpa"]
 KKM = 75  # batas ketuntasan nilai akhir
+RADIUS_DEFAULT = 100  # meter, dipakai bila kepala sekolah belum mengatur radius
+MAX_AKURASI = 200  # meter, akurasi GPS terburuk yang diterima
 DOKUMEN_ADMIN = ["Kalender Pendidikan & Hari Efektif", "Capaian Pembelajaran (CP) & Alur Tujuan Pembelajaran (ATP)",
                  "Program Tahunan (Prota)", "Program Semester (Promes)", "Modul Ajar", "KKTP / Kriteria Ketercapaian",
                  "Jadwal Pelajaran", "Bahan Ajar / LKPD", "Soal & Kisi-kisi Asesmen", "Daftar Hadir Siswa", "Daftar Nilai",
@@ -68,7 +77,7 @@ BD = {"Hadir": "ok", "Tepat Waktu": "ok", "Sudah Dinilai": "ok", "Baik": "ok", "
       "D": "bad", "Terlambat": "warn", "Sakit": "warn", "Menunggu Penilaian": "info", "Izin": "info",
       "Belum Dikumpulkan": "info", "Cukup": "info", "Alpa": "bad", "Melewati Deadline": "bad",
       "Perlu Perhatian": "bad", "Belum Presensi": "gray", "Lengkap": "ok", "Draf": "warn", "Belum Ada": "bad",
-      "Tuntas": "ok", "Remedial": "bad"}
+      "Tuntas": "ok", "Remedial": "bad", "Cocok": "ok", "Perlu Verifikasi": "warn", "Tidak Cocok": "bad", "Terdaftar": "ok"}
 
 
 def secret(nama, default=""):
@@ -277,6 +286,12 @@ div[class*="st-key-card"]{background:#fff;border:1px solid var(--line);border-ra
 [data-testid="stTextInput"] button{background:transparent!important}
 [data-testid="stTextInput"] button *{color:var(--mu)!important;fill:var(--mu)!important}
 [data-testid="stForm"] [data-testid="stWidgetLabel"] p{font-weight:600;color:var(--navy)!important}
+/* tombol presensi besar dan tombol nonaktif tetap terbaca */
+.st-key-btn_masuk button,.st-key-btn_pulang button{width:100%;min-height:56px;font-size:1.05rem}
+.block-container .st-key-btn_masuk button:not(:disabled){background:#15803D!important;border-color:#15803D!important}
+.block-container .st-key-btn_pulang button:not(:disabled){background:#B45309!important;border-color:#B45309!important}
+.block-container button:disabled,.block-container button[disabled]{background:#E2E8F0!important;border:1px solid #CBD5E1!important;opacity:1!important}
+.block-container button:disabled *,.block-container button[disabled] *{color:#64748B!important}
 @media(min-width:0px){.st-key-topnav{display:block}}
 section[data-testid="stSidebar"] .stButton>button,section[data-testid="stSidebar"] .stButton>button *{color:#DCE6F5!important}
 section[data-testid="stSidebar"] .stButton>button[kind="primary"],section[data-testid="stSidebar"] .stButton>button[kind="primary"] *{color:#fff!important}
@@ -303,6 +318,9 @@ CREATE TABLE IF NOT EXISTS pengumpulan(id INTEGER PRIMARY KEY, tugas_id INTEGER,
 CREATE TABLE IF NOT EXISTS nilai(siswa_id INTEGER, mapel TEXT, harian INTEGER, ujian INTEGER, PRIMARY KEY(siswa_id, mapel));
 CREATE TABLE IF NOT EXISTS pengumuman(id INTEGER PRIMARY KEY, tanggal TEXT, judul TEXT, isi TEXT);
 CREATE TABLE IF NOT EXISTS admin_guru(id INTEGER PRIMARY KEY, guru_id INTEGER, jenis TEXT, nama_file TEXT, berkas BLOB, status TEXT, catatan TEXT, diperbarui TEXT, UNIQUE(guru_id, jenis));
+CREATE TABLE IF NOT EXISTS pengaturan(kunci TEXT PRIMARY KEY, nilai TEXT);
+CREATE TABLE IF NOT EXISTS wajah_guru(guru_id INTEGER PRIMARY KEY, foto BLOB, setuju_pada TEXT, diperbarui TEXT);
+CREATE TABLE IF NOT EXISTS bukti_presensi(id INTEGER PRIMARY KEY, guru_id INTEGER, tanggal TEXT, jenis TEXT, waktu TEXT, lat REAL, lon REAL, akurasi REAL, jarak INTEGER, foto BLOB, wajah TEXT, catatan TEXT, UNIQUE(guru_id, tanggal, jenis));
 """
 
 
@@ -325,6 +343,12 @@ def run(sql, p=(), many=False):
 def one(sql, p=()):
     with closing(db()) as c:
         return c.execute(sql, p).fetchone()
+
+
+def pastikan_skema():
+    """Jalankan setiap sesi: tabel baru dibuat walau init_db sudah tersimpan di cache server."""
+    with closing(db()) as c:
+        c.executescript(SCHEMA)
 
 
 @st.cache_resource
@@ -600,7 +624,7 @@ def tabel_tugas_anak(sid):
           ("Terlambat dikumpulkan", int((d.status == "Terlambat").sum()), "dikirim setelah batas", "r")])
     v = pd.DataFrame({"Tugas": d.judul, "Mata pelajaran": d.mapel, "Batas kumpul": d.deadline.map(fmt), "Status": d.status,
                       "Waktu dikumpulkan": d.waktu, "Berkas": d.nama_file,
-                      "Nilai": d.nilai.map(lambda x: "–" if x != x else int(x)), "Catatan guru": d.umpan_balik})
+                      "Nilai": d.nilai.map(lambda x: "–" if pd.isna(x) else int(x)), "Catatan guru": d.umpan_balik})
     H(panel("Tugas dan pengumpulan", tb(v, ("Status",)), True))
 
 
@@ -610,7 +634,10 @@ def ai(prompt, gambar=None):
         st.error("GEMINI_API_KEY belum diatur. Tambahkan di Streamlit Cloud, menu Settings lalu Secrets.")
         return None
     genai.configure(api_key=API_KEY)
-    isi = [prompt, gambar] if gambar is not None else prompt
+    if gambar is None:
+        isi = prompt
+    else:
+        isi = [prompt] + (list(gambar) if isinstance(gambar, (list, tuple)) else [gambar])
     awal = [st.session_state["_model"]] if st.session_state.get("_model") else []
     for nama in dict.fromkeys(awal + MODEL_KANDIDAT):
         try:
@@ -679,6 +706,146 @@ def buat_docx(teks, judul):
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+# ══════════════════════════ LOKASI & WAJAH (PRESENSI GURU) ══════════════════════════
+def get_set(kunci, default=""):
+    r = one("SELECT nilai FROM pengaturan WHERE kunci=?", (kunci,))
+    return r[0] if r else default
+
+
+def set_set(kunci, nilai):
+    run("INSERT OR REPLACE INTO pengaturan(kunci,nilai) VALUES (?,?)", (kunci, str(nilai)))
+
+
+def titik_sekolah():
+    """(lintang, bujur, radius meter) atau None bila belum diatur kepala sekolah."""
+    try:
+        return float(get_set("lat")), float(get_set("lon")), int(float(get_set("radius", RADIUS_DEFAULT)))
+    except ValueError:
+        return None
+
+
+def jarak_m(lat1, lon1, lat2, lon2):
+    from math import asin, cos, radians, sin, sqrt
+    p1, p2 = radians(lat1), radians(lat2)
+    a = sin((p2 - p1) / 2) ** 2 + cos(p1) * cos(p2) * sin(radians(lon2 - lon1) / 2) ** 2
+    return 2 * 6371000 * asin(sqrt(a))
+
+
+def link_maps(lat, lon):
+    return f"https://www.google.com/maps?q={lat},{lon}"
+
+
+def kecilkan(data, maks=640):
+    im = Image.open(io.BytesIO(data)).convert("RGB")
+    im.thumbnail((maks, maks))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=82)
+    return buf.getvalue()
+
+
+def bandingkan_wajah(ref, baru):
+    """Bandingkan foto acuan dan foto baru dengan AI. Hasil: (status, catatan)."""
+    a = Image.open(io.BytesIO(ref)).convert("RGB")
+    b = Image.open(io.BytesIO(baru)).convert("RGB")
+    teks = ai("Kamu petugas verifikasi identitas. Gambar pertama adalah foto acuan, gambar kedua adalah foto selfie baru. "
+              "Tentukan apakah keduanya orang yang sama. Jika wajah tidak terlihat jelas, atau foto kedua tampak diambil dari layar "
+              "atau foto cetak, jawab TIDAK_JELAS. Jawab HANYA satu baris JSON tanpa teks lain: "
+              '{"hasil":"SAMA|BEDA|TIDAK_JELAS","keyakinan":0-100,"alasan":"satu kalimat singkat"}', [a, b])
+    if not teks:
+        return "Perlu Verifikasi", "AI tidak dapat dihubungi, perlu dicek manual."
+    try:
+        d = json.loads(re.search(r"\{.*\}", teks, re.S).group(0))
+        hasil, yakin, alasan = str(d.get("hasil", "")).upper(), float(d.get("keyakinan", 0)), str(d.get("alasan", ""))
+    except Exception:
+        return "Perlu Verifikasi", "Hasil AI tidak terbaca, perlu dicek manual."
+    if hasil == "SAMA" and yakin >= 70:
+        return "Cocok", alasan
+    if hasil == "BEDA" and yakin >= 70:
+        return "Tidak Cocok", alasan
+    return "Perlu Verifikasi", alasan
+
+
+def _geo(kunci):
+    try:
+        return streamlit_geolocation(key=f"geo_{kunci}")
+    except TypeError:
+        return streamlit_geolocation()
+
+
+def ambil_bukti(kunci, titik):
+    """Ambil lokasi GPS dan foto selfie. Kembalikan ((lat, lon, akurasi) atau None, bytes foto atau None)."""
+    if streamlit_geolocation is None:
+        st.error("Komponen lokasi belum terpasang. Tambahkan streamlit-geolocation ke requirements.txt lalu deploy ulang.")
+        return None, None
+    st.markdown("**1. Lokasi**")
+    st.caption("Tekan ikon lokasi di bawah, lalu izinkan akses lokasi di browser. Gunakan HTTPS.")
+    loc = _geo(kunci)
+    lat = loc.get("latitude") if isinstance(loc, dict) else None
+    lon = loc.get("longitude") if isinstance(loc, dict) else None
+    akur = loc.get("accuracy") if isinstance(loc, dict) else None
+    lokasi = None
+    if lat is None or lon is None:
+        note("warn", "Lokasi belum diambil.")
+    else:
+        lokasi = (float(lat), float(lon), float(akur) if akur is not None else None)
+        info = f"Koordinat {lat:.5f}, {lon:.5f}" + (f", akurasi sekitar {akur:.0f} m" if akur is not None else "")
+        if titik:
+            j = int(jarak_m(lokasi[0], lokasi[1], titik[0], titik[1]))
+            if j <= titik[2]:
+                note("ok", f"{info}. Anda berada {j} m dari sekolah (dalam radius {titik[2]} m).")
+            else:
+                note("bad", f"{info}. Anda berada {j} m dari sekolah, di luar radius {titik[2]} m.")
+        else:
+            note("info", f"{info}. Titik sekolah belum diatur kepala sekolah, jadi radius belum diperiksa.")
+    st.markdown("**2. Foto selfie**")
+    foto = st.camera_input("Ambil foto wajah (menghadap lurus, cahaya cukup)", key=f"cam_{kunci}")
+    return lokasi, (foto.getvalue() if foto else None)
+
+
+def proses_bukti(g, tgl, jenis, lokasi, foto, titik):
+    """Periksa lokasi dan wajah, simpan bukti. Kembalikan (berhasil, pesan, status wajah)."""
+    if lokasi is None:
+        return False, "Lokasi belum diambil. Tekan ikon lokasi dan izinkan akses lokasi.", None
+    if not foto:
+        return False, "Foto selfie belum diambil.", None
+    lat, lon, akur = lokasi
+    if akur is not None and akur > MAX_AKURASI:
+        return False, f"Akurasi lokasi rendah (sekitar {akur:.0f} m). Pindah ke tempat terbuka lalu ambil lokasi lagi.", None
+    jarak = None
+    if titik:
+        jarak = int(jarak_m(lat, lon, titik[0], titik[1]))
+        if jarak > titik[2]:
+            return False, f"Anda berada {jarak} m dari sekolah, di luar radius {titik[2]} m. Presensi hanya dapat dilakukan di area sekolah.", None
+    ref = one("SELECT foto FROM wajah_guru WHERE guru_id=?", (g,))
+    kecil = kecilkan(foto)
+    with st.spinner("Mencocokkan wajah..."):
+        wajah, cat = bandingkan_wajah(ref[0], kecil)
+    if wajah == "Tidak Cocok":
+        return False, f"Wajah tidak cocok dengan foto terdaftar. Ambil ulang foto dengan cahaya cukup. ({cat})", None
+    run("""INSERT OR REPLACE INTO bukti_presensi(guru_id,tanggal,jenis,waktu,lat,lon,akurasi,jarak,foto,wajah,catatan)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (g, tgl, jenis, now().strftime("%H:%M"), lat, lon, akur, jarak, kecil, wajah, cat))
+    return True, "", wajah
+
+
+def daftar_wajah(g):
+    note("warn", "Wajah Anda belum didaftarkan. Daftarkan satu kali sebagai foto acuan presensi. "
+                 "Perubahan selanjutnya hanya dapat dilakukan oleh kepala sekolah.")
+    setuju = st.checkbox("Saya menyetujui foto wajah dan lokasi saya dipakai untuk presensi sesuai kebijakan sekolah.", key="setuju_wajah")
+    foto = st.camera_input("Foto wajah acuan (menghadap lurus, cahaya cukup, tanpa masker)", key="cam_daftar")
+    if st.button("Daftarkan wajah", type="primary", key="btn_daftar_wajah"):
+        if not setuju:
+            st.warning("Centang persetujuan terlebih dahulu.")
+        elif not foto:
+            st.warning("Ambil foto wajah terlebih dahulu.")
+        else:
+            ts = now().strftime("%Y-%m-%d %H:%M")
+            run("INSERT OR REPLACE INTO wajah_guru(guru_id,foto,setuju_pada,diperbarui) VALUES (?,?,?,?)",
+                (g, kecilkan(foto.getvalue()), ts, ts))
+            flash("Wajah berhasil didaftarkan. Sekarang Anda dapat presensi.")
+            st.rerun()
 
 
 # ══════════════════════════ AUTENTIKASI & NAVIGASI ══════════════════════════
@@ -796,6 +963,7 @@ def panduan_login():
         ol = "<ol style='margin:0;padding-left:1.2rem'>"
         H(panel("Absen guru (diisi guru sendiri)", ol
                 + "<li>Buka menu <b>Presensi &amp; jurnal</b>, tab <b>Presensi saya</b>.</li>"
+                "<li>Tekan ikon lokasi (izinkan akses lokasi) dan ambil foto selfie. Pertama kali, daftarkan wajah dahulu.</li>"
                 f"<li>Tekan <b>Presensi masuk</b> saat tiba (lewat {BATAS_MASUK} dicatat Terlambat).</li>"
                 "<li>Tekan <b>Presensi pulang</b> saat pulang.</li>"
                 "<li>Bila tidak hadir, isi <b>Tidak dapat hadir?</b> (Sakit atau Izin) lalu <b>Kirim keterangan</b>.</li></ol>"))
@@ -851,40 +1019,64 @@ def guru_presensi(u):
     opsi_mp = [m for m, gu in MP if gu == u["username"]] or [m for m, _ in MP]
     with t1:
         note("info", "<b>Cara absen guru:</b><ol style='margin:6px 0 0;padding-left:1.2rem'>"
-                     "<li>Sampai di sekolah, tekan tombol <b>Presensi masuk</b> (lewat pukul " + BATAS_MASUK + " dicatat Terlambat).</li>"
-                     "<li>Sebelum pulang, tekan tombol <b>Presensi pulang</b>.</li>"
-                     "<li>Kalau tidak bisa hadir, isi kotak <b>Tidak dapat hadir?</b> di sebelah kanan, pilih Sakit atau Izin, "
-                     "tulis keterangan, lalu tekan <b>Kirim keterangan</b>.</li></ol>")
+                     "<li>Tekan ikon lokasi dan izinkan akses lokasi di browser.</li>"
+                     "<li>Ambil foto selfie dengan kamera, wajah menghadap lurus dan terlihat jelas.</li>"
+                     "<li>Tekan <b>Presensi masuk</b> (lewat pukul " + BATAS_MASUK + " dicatat Terlambat). "
+                     "Sistem memeriksa lokasi dan mencocokkan wajah.</li>"
+                     "<li>Sebelum pulang, ulangi langkah 1 dan 2, lalu tekan <b>Presensi pulang</b>.</li>"
+                     "<li>Bila tidak hadir, isi bagian <b>Tidak dapat hadir</b> di bawah.</li></ol>")
         pr = one("SELECT status, jam_masuk, jam_pulang FROM presensi_guru WHERE guru_id=? AND tanggal=?", (g, hi))
-        a, b = st.columns(2)
-        with a:
-            if pr:
-                H(panel("Status hari ini", f'{badge(pr[0])}<p style="margin:10px 0 0">Masuk: <b>{esc(pr[1])}</b>, pulang: <b>{esc(pr[2])}</b></p>'))
-            else:
-                H(panel("Status hari ini", badge("Belum Presensi") + '<p style="margin:10px 0 0">Anda belum presensi hari ini.</p>'))
-            if not pr:
-                if st.button("Presensi masuk", type="primary"):
-                    jam = now().strftime("%H:%M")
-                    run("INSERT OR REPLACE INTO presensi_guru(guru_id,tanggal,jam_masuk,status,keterangan) VALUES (?,?,?,?,?)",
-                        (g, hi, jam, "Terlambat" if jam > BATAS_MASUK else "Hadir", ""))
-                    flash(f"Presensi masuk tercatat pukul {jam} WIB.")
-                    st.rerun()
-            elif pr[0] in ("Hadir", "Terlambat") and not pr[2]:
-                if st.button("Presensi pulang", type="primary"):
-                    jam = now().strftime("%H:%M")
-                    run("UPDATE presensi_guru SET jam_pulang=? WHERE guru_id=? AND tanggal=?", (jam, g, hi))
-                    flash(f"Presensi pulang tercatat pukul {jam} WIB.")
-                    st.rerun()
-        with b:
-            if not pr:
-                with st.form("f_izin"):
-                    sts = st.radio("Tidak dapat hadir?", ["Sakit", "Izin"], horizontal=True)
-                    ket = st.text_input("Keterangan")
-                    if st.form_submit_button("Kirim keterangan"):
+        if pr:
+            ket_st = f'{badge(pr[0])}<p style="margin:10px 0 0">Masuk: <b>{esc(pr[1])}</b>, pulang: <b>{esc(pr[2])}</b></p>'
+        else:
+            ket_st = badge("Belum Presensi") + '<p style="margin:10px 0 0">Anda belum presensi hari ini.</p>'
+        H(panel("Status hari ini", ket_st))
+        titik = titik_sekolah()
+        boleh_masuk = pr is None
+        boleh_pulang = bool(pr) and pr[0] in ("Hadir", "Terlambat") and not pr[2]
+        if not one("SELECT 1 FROM wajah_guru WHERE guru_id=?", (g,)):
+            sec("Daftarkan wajah")
+            daftar_wajah(g)
+        else:
+            lokasi, foto = None, None
+            if boleh_masuk or boleh_pulang:
+                sec("Lokasi dan foto selfie")
+                lokasi, foto = ambil_bukti("masuk" if boleh_masuk else "pulang", titik)
+            sec("Tombol presensi")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ Presensi masuk", key="btn_masuk", type="primary", disabled=not boleh_masuk):
+                    ok, pesan, wajah = proses_bukti(g, hi, "masuk", lokasi, foto, titik)
+                    if ok:
+                        jam = now().strftime("%H:%M")
                         run("INSERT OR REPLACE INTO presensi_guru(guru_id,tanggal,jam_masuk,status,keterangan) VALUES (?,?,?,?,?)",
-                            (g, hi, None, sts, ket.strip()))
-                        flash("Keterangan ketidakhadiran tersimpan.")
+                            (g, hi, jam, "Terlambat" if jam > BATAS_MASUK else "Hadir", ""))
+                        flash(f"Presensi masuk tercatat pukul {jam} WIB. Wajah: {wajah}.")
                         st.rerun()
+                    else:
+                        st.error(pesan)
+                st.caption("Aktif bila belum presensi hari ini." if boleh_masuk else "Sudah presensi masuk hari ini.")
+            with c2:
+                if st.button("🏠 Presensi pulang", key="btn_pulang", type="primary", disabled=not boleh_pulang):
+                    ok, pesan, wajah = proses_bukti(g, hi, "pulang", lokasi, foto, titik)
+                    if ok:
+                        jam = now().strftime("%H:%M")
+                        run("UPDATE presensi_guru SET jam_pulang=? WHERE guru_id=? AND tanggal=?", (jam, g, hi))
+                        flash(f"Presensi pulang tercatat pukul {jam} WIB. Wajah: {wajah}.")
+                        st.rerun()
+                    else:
+                        st.error(pesan)
+                st.caption("Aktif setelah presensi masuk." if not pr else ("Sudah presensi pulang." if pr[2] else
+                           ("Aktif, tekan saat pulang." if boleh_pulang else "Tidak tersedia untuk status ini.")))
+        sec("Tidak dapat hadir (sakit atau izin)")
+        with st.form("f_izin"):
+            sts = st.radio("Alasan", ["Sakit", "Izin"], horizontal=True, disabled=not boleh_masuk)
+            ket = st.text_input("Keterangan", disabled=not boleh_masuk)
+            if st.form_submit_button("📨 Kirim keterangan", disabled=not boleh_masuk):
+                run("INSERT OR REPLACE INTO presensi_guru(guru_id,tanggal,jam_masuk,status,keterangan) VALUES (?,?,?,?,?)",
+                    (g, hi, None, sts, ket.strip()))
+                flash("Keterangan ketidakhadiran tersimpan.")
+                st.rerun()
     with t2:
         note("info", "<b>Cara mengabsen siswa:</b><ol style='margin:6px 0 0;padding-left:1.2rem'>"
                      "<li>Pilih <b>Kelas</b> dan <b>Mata pelajaran</b>.</li>"
@@ -963,16 +1155,16 @@ def guru_tugas(u):
               ("Belum mengumpulkan", int(df.pid.isna().sum()), "siswa", "o"), ("Sudah dinilai", dinilai, "pengumpulan", "t")])
         tampil = pd.DataFrame({
             "Nama siswa": df.nama,
-            "Status": ["Belum Dikumpulkan" if p != p else ("Sudah Dinilai" if n == n else "Menunggu Penilaian")
+            "Status": ["Belum Dikumpulkan" if pd.isna(p) else ("Sudah Dinilai" if pd.notna(n) else "Menunggu Penilaian")
                        for p, n in zip(df.pid, df.nilai)],
             "Waktu kumpul": df.waktu.fillna("–"), "Nilai": df.nilai, "Umpan balik": df.umpan_balik.fillna("")})
         ed = grid(tampil, key=f"nilai_tugas_{tid}", disabled=["Nama siswa", "Status", "Waktu kumpul"],
                   column_config={"Nilai": st.column_config.NumberColumn("Nilai", min_value=0, max_value=100, step=1)})
         if st.button("Simpan penilaian", type="primary"):
             for pid, nl, fb in zip(df.pid, ed["Nilai"], ed["Umpan balik"]):
-                if pid == pid:
+                if pd.notna(pid):
                     run("UPDATE pengumpulan SET nilai=?, umpan_balik=? WHERE id=?",
-                        (None if nl != nl else int(nl), (fb or "").strip(), int(pid)))
+                        (None if pd.isna(nl) else int(nl), (fb or "").strip() if isinstance(fb, str) else "", int(pid)))
             flash("Penilaian tersimpan.")
             st.rerun()
         sub = df[df.pid.notna()]
@@ -996,7 +1188,7 @@ def guru_nilai(u):
                              "Ujian": st.column_config.NumberColumn(min_value=0, max_value=100, step=1)})
     if st.button("Simpan nilai", type="primary"):
         run("INSERT OR REPLACE INTO nilai(siswa_id,mapel,harian,ujian) VALUES (?,?,?,?)",
-            [(int(i), mapel, None if h != h else int(h), None if x != x else int(x))
+            [(int(i), mapel, None if pd.isna(h) else int(h), None if pd.isna(x) else int(x))
              for i, h, x in zip(d.id, ed["Harian"], ed["Ujian"])], many=True)
         flash("Nilai berhasil disimpan.")
         st.rerun()
@@ -1161,9 +1353,9 @@ Catatan tambahan: {ket.strip() or '-'}""")
                            f"daftar_hadir_{kelas}_{mapel}.csv", "text/csv", key="adm_csv_hadir")
         n = qdf("""SELECT si.nis AS NIS, si.nama AS 'Nama siswa', n.harian AS Harian, n.ujian AS Ujian FROM siswa si
                    LEFT JOIN nilai n ON n.siswa_id=si.id AND n.mapel=? WHERE si.kelas=? ORDER BY si.nama""", (mapel, kelas))
-        n["Nilai akhir"] = (n["Harian"] * .4 + n["Ujian"] * .6).round(1)
-        n["Huruf"] = n["Nilai akhir"].map(lambda x: "–" if x != x else huruf(x))
-        n["Ketuntasan"] = n["Nilai akhir"].map(lambda x: "–" if x != x else ("Tuntas" if x >= KKM else "Remedial"))
+        n["Nilai akhir"] = (pd.to_numeric(n["Harian"]) * .4 + pd.to_numeric(n["Ujian"]) * .6).round(1)
+        n["Huruf"] = n["Nilai akhir"].map(lambda x: "–" if pd.isna(x) else huruf(x))
+        n["Ketuntasan"] = n["Nilai akhir"].map(lambda x: "–" if pd.isna(x) else ("Tuntas" if x >= KKM else "Remedial"))
         sec(f"Daftar nilai dan analisis (KKM {KKM})")
         nv = n["Nilai akhir"].dropna()
         if nv.empty:
@@ -1452,140 +1644,4 @@ def kepsek_nilai(u):
     hero("Nilai & tugas", "Capaian akademik per kelas dan pemantauan pengumpulan tugas.")
     t1, t2 = st.tabs(["Rata-rata nilai", "Monitoring tugas"])
     with t1:
-        d = qdf("""SELECT si.kelas AS Kelas, n.mapel AS 'Mata pelajaran', ROUND(AVG(n.harian),1) AS Harian,
-                          ROUND(AVG(n.ujian),1) AS Ujian, ROUND(AVG(n.harian*0.4+n.ujian*0.6),1) AS 'Nilai akhir'
-                   FROM nilai n JOIN siswa si ON si.id=n.siswa_id GROUP BY si.kelas, n.mapel ORDER BY si.kelas, n.mapel""")
-        H(panel("Rata-rata nilai per kelas dan mata pelajaran", tb(d), True))
-    with t2:
-        d = qdf("""SELECT t.judul AS Tugas, t.mapel AS 'Mata pelajaran', t.kelas AS Kelas, t.deadline AS 'Batas kumpul',
-                          (SELECT COUNT(*) FROM siswa WHERE kelas=t.kelas) AS total, COUNT(p.id) AS terkumpul,
-                          SUM(p.nilai IS NOT NULL) AS Dinilai, ROUND(AVG(p.nilai),1) AS 'Rata-rata nilai'
-                   FROM tugas t LEFT JOIN pengumpulan p ON p.tugas_id=t.id GROUP BY t.id ORDER BY t.deadline DESC""")
-        d["Pengumpulan"] = [f"{a} dari {b} ({pct(a, b)}%)" for a, b in zip(d.terkumpul, d.total)]
-        d["Batas kumpul"] = d["Batas kumpul"].map(fmt)
-        H(panel("Pengumpulan tugas", tb(d.drop(columns=["total", "terkumpul"])), True))
-
-
-def kepsek_admin(u):
-    hero("Administrasi guru", "Pantau kelengkapan perangkat pembelajaran setiap guru.")
-    gr = qdf("SELECT id, nama FROM users WHERE role='guru' ORDER BY nama")
-    ad = qdf("SELECT guru_id, jenis, status, diperbarui FROM admin_guru")
-    ad = ad[ad.jenis.isin(DOKUMEN_ADMIN)]
-    N, rows = len(DOKUMEN_ADMIN), []
-    for gid, nm in zip(gr.id, gr.nama):
-        s = ad[ad.guru_id == gid]
-        lk, dr = int((s.status == "Lengkap").sum()), int((s.status == "Draf").sum())
-        rows.append((nm, lk, dr, N - lk - dr, f"{pct(lk, N)}%"))
-    rk = pd.DataFrame(rows, columns=["Guru", "Lengkap", "Draf", "Belum ada", "Kelengkapan"])
-    tot = int((ad.status == "Lengkap").sum())
-    kpis([("Kelengkapan rata-rata", f"{pct(tot, N * max(len(gr), 1))}%", f"{len(gr)} guru, {N} dokumen per guru", "g"),
-          ("Dokumen lengkap", tot, "seluruh guru", ""),
-          ("Masih draf", int((ad.status == "Draf").sum()), "perlu dilengkapi", "o")])
-    H(panel("Rekap per guru", tb(rk), True))
-    mat = pd.DataFrame({"Dokumen": DOKUMEN_ADMIN})
-    tanda = {"Lengkap": "✔ Lengkap", "Draf": "… Draf"}
-    for gid, nm in zip(gr.id, gr.nama):
-        peta = dict(ad[ad.guru_id == gid][["jenis", "status"]].values.tolist())
-        mat[nm] = [tanda.get(peta.get(j), "– Belum") for j in DOKUMEN_ADMIN]
-    H(panel("Rincian per dokumen", tb(mat), True))
-
-
-# ══════════════════════════ PORTAL ORANG TUA ══════════════════════════
-def ortu_anak(u):
-    if not u["siswa_id"]:
-        H('<div class="empty">Akun ini belum dihubungkan dengan data siswa. Hubungi admin sekolah.</div>')
-        return None
-    return u["siswa_id"]
-
-
-def ortu_home(u):
-    sid = u["siswa_id"]
-    if not sid:
-        hero("Beranda orang tua")
-        ortu_anak(u)
-        return
-    nis, nama, kelas = one("SELECT nis, nama, kelas FROM siswa WHERE id=?", (sid,))
-    hero("Beranda orang tua", f"{sapa()}, {u['nama']}. Pantau perkembangan belajar {nama.split()[0]} di sini.")
-    H(f'<div class="profile"><div class="av big">{esc(initials(nama))}</div><div><b>{esc(nama)}</b>'
-      f'<span>NIS {esc(nis)}, kelas {esc(kelas)}</span><span>Wali kelas: {esc(WALI.get(kelas, "-"))}</span></div></div>')
-    tg, pr = daftar_tugas_siswa(sid), rekap_presensi(sid)
-    hadir, alpa = int((pr.status == "Hadir").sum()), int((pr.status == "Alpa").sum())
-    belum = tg[tg.status.isin(["Belum Dikumpulkan", "Melewati Deadline"])].sort_values("deadline")
-    rata = one("SELECT AVG(harian*0.4+ujian*0.6) FROM nilai WHERE siswa_id=?", (sid,))[0]
-    kpis([("Kehadiran", f"{pct(hadir, len(pr))}%", f"{hadir} dari {len(pr)} pertemuan", "g"),
-          ("Tugas dikumpulkan", f"{int(tg.waktu.notna().sum())} dari {len(tg)}", "tugas kelas ini", ""),
-          ("Belum dikumpulkan", len(belum), "perlu ditindaklanjuti", "o" if len(belum) else "g"),
-          ("Rata-rata nilai akhir", f"{rata:.1f}" if rata else "–", "seluruh mata pelajaran", "t")])
-    if alpa:
-        note("bad", f"Tercatat alpa {alpa} kali. Mohon konfirmasi ke wali kelas bila ada kendala.")
-    for r in belum.head(5).itertuples():
-        sisa = (date.fromisoformat(r.deadline) - today()).days
-        if sisa >= 0:
-            note("warn", f"Tugas <b>{esc(r.judul)}</b> ({esc(r.mapel)}) belum dikumpulkan. Batas kumpul {fmt(r.deadline)}, sisa {sisa} hari.")
-        else:
-            note("bad", f"Tugas <b>{esc(r.judul)}</b> ({esc(r.mapel)}) melewati batas kumpul sejak {fmt(r.deadline)}.")
-    a, b = st.columns([1.2, 1])
-    with a:
-        v = pd.DataFrame({"Tanggal": pr.tanggal.map(fmt), "Mata pelajaran": pr.mapel, "Status": pr.status}).head(6)
-        H(panel("Presensi terbaru", tb(v, ("Status",), "Belum ada data presensi."), True))
-    with b:
-        H(panel("Pengumuman sekolah", pengumuman_html(2)))
-
-
-def ortu_presensi(u):
-    hero("Presensi anak", "Kehadiran anak pada setiap pertemuan dan rekap per mata pelajaran.")
-    note("info", "Kehadiran anak dicatat oleh guru setiap selesai pelajaran. Anda cukup melihat hasilnya di halaman ini.")
-    if ortu_anak(u):
-        blok_presensi(u["siswa_id"])
-
-
-def ortu_tugas(u):
-    hero("Tugas & pengumpulan", "Daftar tugas anak, status pengumpulan, nilai, dan catatan guru.")
-    if ortu_anak(u):
-        tabel_tugas_anak(u["siswa_id"])
-
-
-def ortu_nilai(u):
-    hero("Nilai anak", "Hasil belajar anak per mata pelajaran.")
-    if ortu_anak(u):
-        blok_nilai(u["siswa_id"])
-
-
-# ══════════════════════════ ENTRY POINT ══════════════════════════
-PAGES = {
-    "guru": {"🏠 Beranda": guru_home, "🕒 Presensi & jurnal": guru_presensi, "📤 Tugas & penilaian": guru_tugas,
-             "📊 Buku nilai": guru_nilai, "🗂️ Administrasi guru": guru_admin, "✨ Asisten AI": guru_ai},
-    "siswa": {"🏠 Beranda": siswa_home, "📚 Tugas saya": siswa_tugas, "🗓️ Presensi saya": siswa_presensi,
-              "🎓 Nilai & rapor": siswa_nilai, "🤖 Tutor AI": siswa_tutor},
-    "kepsek": {"🏠 Dashboard": kepsek_home, "🕘 Presensi guru": kepsek_pguru, "👥 Presensi siswa": kepsek_psiswa,
-               "📖 Jurnal mengajar": kepsek_jurnal, "📈 Nilai & tugas": kepsek_nilai, "🗂️ Administrasi guru": kepsek_admin},
-    "ortu": {"🏠 Beranda": ortu_home, "🗓️ Presensi anak": ortu_presensi, "📤 Tugas & pengumpulan": ortu_tugas,
-             "🎓 Nilai anak": ortu_nilai},
-}
-
-
-def navbar_atas(u, aktif):
-    """Menu di halaman utama, supaya tetap terlihat di HP saat sidebar tertutup."""
-    menu = list(PAGES[u["role"]])
-    with st.container(key="topnav"):
-        pilih = st.radio("Menu", menu, index=menu.index(aktif), horizontal=True,
-                         label_visibility="collapsed", key=f"topnav_{aktif}")
-    if pilih != aktif:
-        st.session_state["menu"] = pilih
-        st.rerun()
-
-
-def main():
-    pasang_css()
-    init_db()
-    u = st.session_state.get("user")
-    if not u:
-        halaman_login()
-        return
-    aktif = sidebar(u)
-    navbar_atas(u, aktif)
-    tampil_flash()
-    PAGES[u["role"]][aktif](u)
-
-
-main()
+        d = qdf("""SELECT si.kelas AS Kelas, n.mapel AS 'Mata pelajaran', ROUND(AVG(n.harian),1) AS Ha
