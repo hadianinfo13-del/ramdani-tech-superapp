@@ -50,10 +50,25 @@ ROLE = {"guru": "Pengajar", "siswa": "Peserta didik", "kepsek": "Kepala sekolah"
 HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
 BLN = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
 STATUS_HADIR = ["Hadir", "Sakit", "Izin", "Alpa"]
+KKM = 75  # batas ketuntasan nilai akhir
+DOKUMEN_ADMIN = ["Kalender Pendidikan & Hari Efektif", "Capaian Pembelajaran (CP) & Alur Tujuan Pembelajaran (ATP)",
+                 "Program Tahunan (Prota)", "Program Semester (Promes)", "Modul Ajar", "KKTP / Kriteria Ketercapaian",
+                 "Jadwal Pelajaran", "Bahan Ajar / LKPD", "Soal & Kisi-kisi Asesmen", "Daftar Hadir Siswa", "Daftar Nilai",
+                 "Analisis Hasil Penilaian", "Program Remedial & Pengayaan", "Jurnal Mengajar", "Laporan Refleksi / PKG"]
+GENERATOR = {
+    "Program Tahunan (Prota)": "Tabel: semester, bab/lingkup materi, tujuan pembelajaran, alokasi jam pelajaran, dan keterangan. Total JP sesuai minggu efektif.",
+    "Program Semester (Promes)": "Tabel: no, materi, alokasi JP, dan kolom minggu ke-1 sampai ke-20 per bulan (tandai minggu pelaksanaan), plus minggu tidak efektif dan asesmen.",
+    "Capaian Pembelajaran (CP) & Alur Tujuan Pembelajaran (ATP)": "Uraikan CP fase, elemen, tujuan pembelajaran berurutan, alokasi waktu, dan dimensi Profil Lulusan/Pelajar Pancasila.",
+    "KKTP / Kriteria Ketercapaian": "Tabel: tujuan pembelajaran, kriteria ketercapaian (rubrik 4 level), indikator, teknik asesmen.",
+    "Program Remedial & Pengayaan": "Berisi identifikasi kesulitan, strategi remedial, kegiatan pengayaan, jadwal, instrumen, dan tabel tindak lanjut siswa.",
+    "Soal & Kisi-kisi Asesmen": "Berisi kisi-kisi (tujuan, indikator, level kognitif, bentuk, nomor), 10 soal pilihan ganda, 3 soal uraian, kunci, dan pedoman skor.",
+    "Bahan Ajar / LKPD": "Berisi ringkasan materi, contoh, LKPD bertahap, latihan, dan refleksi, dengan bahasa sesuai jenjang.",
+}
 BD = {"Hadir": "ok", "Tepat Waktu": "ok", "Sudah Dinilai": "ok", "Baik": "ok", "A": "ok", "B": "info", "C": "warn",
       "D": "bad", "Terlambat": "warn", "Sakit": "warn", "Menunggu Penilaian": "info", "Izin": "info",
       "Belum Dikumpulkan": "info", "Cukup": "info", "Alpa": "bad", "Melewati Deadline": "bad",
-      "Perlu Perhatian": "bad", "Belum Presensi": "gray"}
+      "Perlu Perhatian": "bad", "Belum Presensi": "gray", "Lengkap": "ok", "Draf": "warn", "Belum Ada": "bad",
+      "Tuntas": "ok", "Remedial": "bad"}
 
 
 def secret(nama, default=""):
@@ -254,6 +269,14 @@ div[class*="st-key-card"]{background:#fff;border:1px solid var(--line);border-ra
 [data-testid="stChatMessage"]{background:#fff;border:1px solid var(--line);border-radius:4px}
 [data-testid="stChatMessage"] *{color:var(--tx)}
 [data-testid="stDataFrame"],[data-testid="stDataEditor"]{color-scheme:light;background:#fff}
+/* kotak isian punya garis tepi yang jelas (username, password, dan lainnya) */
+[data-baseweb="input"]{border:1px solid #9DB0CB!important;border-radius:4px!important;background:#fff!important}
+[data-baseweb="base-input"]{border:0!important;background:#fff!important}
+[data-baseweb="select"]>div{border:1px solid #9DB0CB!important}
+[data-testid="stTextInput"] input{min-height:42px;font-size:1rem}
+[data-testid="stTextInput"] button{background:transparent!important}
+[data-testid="stTextInput"] button *{color:var(--mu)!important;fill:var(--mu)!important}
+[data-testid="stForm"] [data-testid="stWidgetLabel"] p{font-weight:600;color:var(--navy)!important}
 @media(min-width:0px){.st-key-topnav{display:block}}
 section[data-testid="stSidebar"] .stButton>button,section[data-testid="stSidebar"] .stButton>button *{color:#DCE6F5!important}
 section[data-testid="stSidebar"] .stButton>button[kind="primary"],section[data-testid="stSidebar"] .stButton>button[kind="primary"] *{color:#fff!important}
@@ -279,6 +302,7 @@ CREATE TABLE IF NOT EXISTS tugas(id INTEGER PRIMARY KEY, judul TEXT, deskripsi T
 CREATE TABLE IF NOT EXISTS pengumpulan(id INTEGER PRIMARY KEY, tugas_id INTEGER, siswa_id INTEGER, waktu TEXT, nama_file TEXT, berkas BLOB, nilai INTEGER, umpan_balik TEXT, UNIQUE(tugas_id, siswa_id));
 CREATE TABLE IF NOT EXISTS nilai(siswa_id INTEGER, mapel TEXT, harian INTEGER, ujian INTEGER, PRIMARY KEY(siswa_id, mapel));
 CREATE TABLE IF NOT EXISTS pengumuman(id INTEGER PRIMARY KEY, tanggal TEXT, judul TEXT, isi TEXT);
+CREATE TABLE IF NOT EXISTS admin_guru(id INTEGER PRIMARY KEY, guru_id INTEGER, jenis TEXT, nama_file TEXT, berkas BLOB, status TEXT, catatan TEXT, diperbarui TEXT, UNIQUE(guru_id, jenis));
 """
 
 
@@ -692,7 +716,7 @@ def sidebar(u):
     return aktif
 
 
-def halaman_login():
+def _form_login():
     a, b = st.columns([1.15, 1], gap="large")
     with a:
         H(f'<div class="lg"><div class="logo">🎓</div><h2>LMS {esc(NAMA_SEKOLAH)}</h2>'
@@ -715,6 +739,67 @@ def halaman_login():
                 H(tb(pd.DataFrame([("Guru", "guru", "guru123"), ("Siswa", "siswa", "siswa123"),
                                    ("Kepala sekolah", "kepsek", "kepsek123"), ("Orang tua", "ortu", "ortu123")],
                                   columns=["Peran", "Username", "Password"])))
+
+
+PANDUAN = {
+    "👩‍🏫 Guru": (
+        "Pengajar mengelola presensi, jurnal, tugas, nilai, dan perangkat pembelajaran dalam satu tempat.",
+        [("Beranda", "Ringkasan jadwal mengajar hari ini, tugas aktif, dan pengumpulan yang menunggu dinilai."),
+         ("Presensi & jurnal", "Presensi masuk dan pulang guru, izin atau sakit, jurnal mengajar, dan presensi siswa per pertemuan."),
+         ("Tugas & penilaian", "Terbitkan tugas untuk kelas, pantau siapa yang sudah mengumpulkan, beri nilai dan umpan balik."),
+         ("Buku nilai", "Isi nilai harian dan ujian. Nilai akhir dihitung otomatis (40% harian, 60% ujian)."),
+         ("Administrasi guru", "Unggah perangkat pembelajaran (Prota, Promes, modul ajar, dan lainnya), rekap hadir dan nilai, serta jadwal mengajar."),
+         ("Asisten AI", "Susun modul ajar dan koreksi lembar jawaban tulisan tangan dengan bantuan AI.")],
+        ["Masuk dengan akun guru dari sekolah.", "Lakukan presensi masuk di menu Presensi & jurnal.",
+         "Isi jurnal dan presensi siswa setelah mengajar.", "Terbitkan tugas dan nilai pengumpulan siswa."]),
+    "🎒 Siswa": (
+        "Peserta didik melihat tugas, mengumpulkan pekerjaan, dan memantau kehadiran serta nilai sendiri.",
+        [("Beranda", "Ringkasan kehadiran, tugas yang belum dikumpulkan, jadwal hari ini, dan pengumuman."),
+         ("Tugas saya", "Daftar tugas dari guru. Unggah berkas (PDF, DOCX, atau foto) lalu tekan Kirim tugas."),
+         ("Presensi saya", "Rekap kehadiran per mata pelajaran dan riwayat tiap pertemuan."),
+         ("Nilai & rapor", "Nilai harian, ujian, nilai akhir, dan nilai tugas."),
+         ("Tutor AI", "Tanya materi pelajaran dan dapatkan penjelasan sederhana beserta latihan.")],
+        ["Masuk dengan akun siswa dari sekolah.", "Buka menu Tugas saya untuk melihat batas kumpul.",
+         "Unggah berkas tugas sebelum batas waktu.", "Lihat nilai dan catatan guru setelah tugas dinilai."]),
+    "🏫 Kepala sekolah": (
+        "Kepala sekolah memantau kedisiplinan guru, kehadiran siswa, dan capaian akademik tanpa menunggu laporan.",
+        [("Dashboard", "Guru hadir hari ini, tren kehadiran siswa, dan pengumuman. Kepala sekolah dapat menerbitkan pengumuman."),
+         ("Presensi guru", "Rekap kehadiran, keterlambatan, sakit, dan izin guru dengan filter tanggal, dapat diunduh CSV."),
+         ("Presensi siswa", "Rekap kehadiran per siswa dan per kelas, beserta siswa yang perlu perhatian."),
+         ("Jurnal mengajar", "Semua pertemuan yang dicatat guru."),
+         ("Nilai & tugas", "Rata-rata nilai per kelas dan mata pelajaran, serta pengumpulan tugas."),
+         ("Administrasi guru", "Kelengkapan perangkat pembelajaran setiap guru.")],
+        ["Masuk dengan akun kepala sekolah.", "Mulai dari Dashboard untuk gambaran hari ini.",
+         "Buka menu rekap bila perlu rincian.", "Unduh CSV untuk laporan."]),
+    "👨‍👩‍👧 Orang tua": (
+        "Orang tua atau wali memantau perkembangan belajar anak secara langsung.",
+        [("Beranda", "Profil anak, wali kelas, ringkasan kehadiran, tugas, nilai, dan peringatan bila ada tugas terlewat atau alpa."),
+         ("Presensi anak", "Kehadiran anak pada setiap pertemuan dan rekap per mata pelajaran."),
+         ("Tugas & pengumpulan", "Daftar tugas anak, status pengumpulan, nilai, dan catatan guru."),
+         ("Nilai anak", "Nilai harian, ujian, nilai akhir, dan nilai tugas per mata pelajaran.")],
+        ["Masuk dengan akun orang tua dari sekolah.", "Baca peringatan di Beranda.",
+         "Periksa tugas yang belum dikumpulkan dan ingatkan anak.", "Hubungi wali kelas bila ada kendala."]),
+}
+
+
+def panduan_login():
+    st.markdown("### Panduan penggunaan")
+    st.caption("Pilih peran Anda untuk melihat menu dan cara memakainya. Akun diberikan oleh sekolah.")
+    tabs = st.tabs(list(PANDUAN))
+    for tab, (peran, (desc, menu, langkah)) in zip(tabs, PANDUAN.items()):
+        with tab:
+            H(panel(peran, f"<p style='margin:0'>{esc(desc)}</p>"))
+            H(panel("Menu yang tersedia", tb(pd.DataFrame(menu, columns=["Menu", "Fungsi"])), True))
+            H(panel("Langkah singkat", "<ol style='margin:0;padding-left:1.2rem'>"
+                    + "".join(f"<li>{esc(x)}</li>" for x in langkah) + "</ol>"))
+
+
+def halaman_login():
+    t1, t2 = st.tabs(["🔐 Masuk", "📘 Panduan penggunaan"])
+    with t1:
+        _form_login()
+    with t2:
+        panduan_login()
 
 
 # ══════════════════════════ PORTAL GURU ══════════════════════════
@@ -946,6 +1031,133 @@ Struktur wajib: 1) Identitas modul 2) Kompetensi awal dan dimensi Profil Lulusan
         if st.session_state.get("koreksi"):
             with st.container(key="card_koreksi"):
                 st.markdown(st.session_state["koreksi"])
+
+
+def guru_admin(u):
+    hero("Administrasi guru", "Kelola perangkat pembelajaran, rekap otomatis, dan jadwal mengajar Anda.")
+    g = u["id"]
+    opsi_mp = [m for m, gu in MP if gu == u["username"]] or [m for m, _ in MP]
+    t1, t2, t3, t4 = st.tabs(["📁 Kelengkapan dokumen", "🤖 Susun dengan AI", "📊 Rekap otomatis", "🗓️ Jadwal & beban"])
+    ada = qdf("SELECT jenis, nama_file, status, catatan, diperbarui FROM admin_guru WHERE guru_id=?", (g,))
+    ada = ada[ada.jenis.isin(DOKUMEN_ADMIN)]
+    with t1:
+        lengkap, draf = int((ada.status == "Lengkap").sum()), int((ada.status == "Draf").sum())
+        kpis([("Kelengkapan", f"{pct(lengkap, len(DOKUMEN_ADMIN))}%", f"{lengkap} dari {len(DOKUMEN_ADMIN)} dokumen", "g"),
+              ("Berstatus draf", draf, "perlu dilengkapi", "o"),
+              ("Belum ada", len(DOKUMEN_ADMIN) - lengkap - draf, "belum diunggah", "r")])
+        info = ada.set_index("jenis")
+        v = pd.DataFrame({"Dokumen": DOKUMEN_ADMIN,
+                          "Status": [info.status.get(j, "Belum Ada") for j in DOKUMEN_ADMIN],
+                          "Berkas": [info.nama_file.get(j) for j in DOKUMEN_ADMIN],
+                          "Diperbarui": [info.diperbarui.get(j) for j in DOKUMEN_ADMIN],
+                          "Catatan": [info.catatan.get(j) or None for j in DOKUMEN_ADMIN]})
+        H(panel("Daftar perangkat pembelajaran", tb(v, ("Status",)), True))
+        sec("Unggah atau perbarui dokumen")
+        with st.form("f_admin", clear_on_submit=True):
+            jenis = st.selectbox("Jenis dokumen", DOKUMEN_ADMIN)
+            f = st.file_uploader("Berkas (PDF, DOCX, XLSX, PPTX, gambar, maksimal 5 MB)",
+                                 type=["pdf", "docx", "xlsx", "pptx", "png", "jpg", "jpeg"])
+            sts = st.radio("Status", ["Lengkap", "Draf"], horizontal=True)
+            cat = st.text_input("Catatan (opsional)")
+            if st.form_submit_button("Simpan dokumen", type="primary"):
+                if f is None:
+                    st.warning("Pilih berkas terlebih dahulu.")
+                elif f.size > 5 * 1024 * 1024:
+                    st.error("Ukuran berkas maksimal 5 MB.")
+                else:
+                    run("INSERT OR REPLACE INTO admin_guru(guru_id,jenis,nama_file,berkas,status,catatan,diperbarui) VALUES (?,?,?,?,?,?,?)",
+                        (g, jenis, f.name, f.getvalue(), sts, cat.strip(), now().strftime("%Y-%m-%d %H:%M")))
+                    flash(f'Dokumen "{jenis}" tersimpan.')
+                    st.rerun()
+        if not ada.empty:
+            pil = st.selectbox("Pilih dokumen tersimpan", list(ada.jenis), key="adm_pilih")
+            r = one("SELECT nama_file, berkas FROM admin_guru WHERE guru_id=? AND jenis=?", (g, pil))
+            c1, c2 = st.columns(2)
+            c1.download_button("Unduh dokumen", r[1], file_name=r[0], key="adm_unduh")
+            if c2.button("Hapus dokumen", key="adm_hapus"):
+                run("DELETE FROM admin_guru WHERE guru_id=? AND jenis=?", (g, pil))
+                flash(f'Dokumen "{pil}" dihapus.')
+                st.rerun()
+    with t2:
+        y = today().year
+        ta0 = f"{y}/{y + 1}" if today().month >= 7 else f"{y - 1}/{y}"
+        with st.form("f_adm_ai"):
+            jenis = st.selectbox("Dokumen yang disusun", list(GENERATOR))
+            a, b, c = st.columns(3)
+            mapel = a.selectbox("Mata pelajaran", opsi_mp)
+            kls = b.text_input("Kelas / fase", "VIII / Fase D")
+            smt = c.selectbox("Semester", ["Ganjil", "Genap"])
+            d, e = st.columns(2)
+            ta = d.text_input("Tahun ajaran", ta0)
+            jp = e.number_input("Jam pelajaran per minggu", 1, 12, 4)
+            ket = st.text_area("Catatan tambahan (topik, KKM, dan sebagainya)", height=80)
+            kirim = st.form_submit_button("Susun dokumen", type="primary")
+        if kirim:
+            with st.spinner("AI sedang menyusun dokumen..."):
+                hasil = ai(f"""Kamu pakar administrasi guru di Indonesia (Kurikulum Merdeka). Susun {jenis} dalam Bahasa Indonesia,
+format Markdown dengan tabel bila sesuai, rapi dan siap dicetak.
+Sekolah: {NAMA_SEKOLAH}. Mata pelajaran: {mapel}. Kelas/Fase: {kls}. Semester: {smt}. Tahun ajaran: {ta}.
+Jam pelajaran per minggu: {jp}. Nama guru: {u['nama']}.
+Petunjuk isi dokumen: {GENERATOR[jenis]}
+Catatan tambahan: {ket.strip() or '-'}""")
+            if hasil:
+                st.session_state["adm_hasil"] = (jenis, f"{jenis} {mapel} {kls} Semester {smt} {ta}", hasil)
+        if st.session_state.get("adm_hasil"):
+            jh, judul, teks = st.session_state["adm_hasil"]
+            nama_f = re.sub(r"[^A-Za-z0-9]+", "_", judul) + ".docx"
+            docx = buat_docx(teks, judul)
+            c1, c2 = st.columns(2)
+            c1.download_button("Unduh (.docx)", docx, nama_f,
+                               "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                               type="primary", key="adm_dl_ai")
+            if c2.button("Simpan ke kelengkapan dokumen", key="adm_simpan_ai"):
+                run("INSERT OR REPLACE INTO admin_guru(guru_id,jenis,nama_file,berkas,status,catatan,diperbarui) VALUES (?,?,?,?,?,?,?)",
+                    (g, jh, nama_f, docx, "Draf", "Disusun dengan AI, mohon dicek", now().strftime("%Y-%m-%d %H:%M")))
+                flash(f'"{jh}" disimpan sebagai draf di kelengkapan dokumen.')
+                st.rerun()
+            with st.container(key="card_adm"):
+                st.markdown(teks)
+    with t3:
+        c1, c2 = st.columns(2)
+        kelas = c1.selectbox("Kelas", KELAS, key="adm_kelas")
+        mapel = c2.selectbox("Mata pelajaran", opsi_mp, key="adm_mapel")
+        h = qdf("""SELECT si.nis AS NIS, si.nama AS 'Nama siswa', COALESCE(SUM(x.status='Hadir'),0) AS Hadir,
+                          COALESCE(SUM(x.status='Sakit'),0) AS Sakit, COALESCE(SUM(x.status='Izin'),0) AS Izin,
+                          COALESCE(SUM(x.status='Alpa'),0) AS Alpa
+                   FROM siswa si LEFT JOIN (SELECT p.siswa_id, p.status FROM presensi_siswa p JOIN sesi s ON s.id=p.sesi_id
+                                            WHERE s.kelas=? AND s.mapel=?) x ON x.siswa_id=si.id
+                   WHERE si.kelas=? GROUP BY si.id ORDER BY si.nama""", (kelas, mapel, kelas))
+        h["Total"] = h[["Hadir", "Sakit", "Izin", "Alpa"]].sum(axis=1)
+        h["% Hadir"] = [f"{pct(a, b)}%" for a, b in zip(h.Hadir, h.Total)]
+        sec("Daftar hadir siswa")
+        H(panel(f"{mapel}, kelas {kelas}", tb(h), True))
+        st.download_button("Unduh daftar hadir (CSV)", h.to_csv(index=False).encode("utf-8-sig"),
+                           f"daftar_hadir_{kelas}_{mapel}.csv", "text/csv", key="adm_csv_hadir")
+        n = qdf("""SELECT si.nis AS NIS, si.nama AS 'Nama siswa', n.harian AS Harian, n.ujian AS Ujian FROM siswa si
+                   LEFT JOIN nilai n ON n.siswa_id=si.id AND n.mapel=? WHERE si.kelas=? ORDER BY si.nama""", (mapel, kelas))
+        n["Nilai akhir"] = (n["Harian"] * .4 + n["Ujian"] * .6).round(1)
+        n["Huruf"] = n["Nilai akhir"].map(lambda x: "–" if x != x else huruf(x))
+        n["Ketuntasan"] = n["Nilai akhir"].map(lambda x: "–" if x != x else ("Tuntas" if x >= KKM else "Remedial"))
+        sec(f"Daftar nilai dan analisis (KKM {KKM})")
+        nv = n["Nilai akhir"].dropna()
+        if nv.empty:
+            H('<div class="empty">Belum ada nilai untuk kelas dan mata pelajaran ini.</div>')
+        else:
+            kpis([("Rata-rata kelas", f"{nv.mean():.1f}", f"{len(nv)} siswa bernilai", ""),
+                  ("Tertinggi", f"{nv.max():.1f}", "nilai akhir", "g"), ("Terendah", f"{nv.min():.1f}", "nilai akhir", "o"),
+                  ("Perlu remedial", int((nv < KKM).sum()), f"di bawah KKM {KKM}", "r" if (nv < KKM).any() else "g")])
+            H(panel("Daftar nilai", tb(n, ("Huruf", "Ketuntasan")), True))
+            st.download_button("Unduh daftar nilai (CSV)", n.to_csv(index=False).encode("utf-8-sig"),
+                               f"daftar_nilai_{kelas}_{mapel}.csv", "text/csv", key="adm_csv_nilai")
+    with t4:
+        rows = sorted((h_, s, k, m) for h_ in range(5) for k in KELAS for s, m, gu in jadwal(k, h_) if gu == u["username"])
+        n_sesi = one("SELECT COUNT(*) FROM sesi WHERE guru_id=? AND tanggal LIKE ?", (g, today().isoformat()[:7] + "%"))[0]
+        kpis([("Jam mengajar per pekan", len(rows), "jam pelajaran terjadwal", ""),
+              ("Kelas diampu", len({r[2] for r in rows}), ", ".join(sorted({r[2] for r in rows})) or "belum ada", "t"),
+              ("Jurnal terisi bulan ini", n_sesi, "pertemuan tercatat", "g")])
+        v = pd.DataFrame([(HARI[a], b, c, d) for a, b, c, d in rows], columns=["Hari", "Jam", "Kelas", "Mata pelajaran"])
+        H(panel("Jadwal mengajar mingguan", tb(v, kosong="Belum ada jadwal mengajar."), True))
+        H(panel("Wali kelas", "".join(f'<div class="ann"><small>Kelas {k}</small><b>{esc(w)}</b></div>' for k, w in WALI.items())))
 
 
 # ══════════════════════════ PORTAL SISWA ══════════════════════════
@@ -1227,6 +1439,30 @@ def kepsek_nilai(u):
         H(panel("Pengumpulan tugas", tb(d.drop(columns=["total", "terkumpul"])), True))
 
 
+def kepsek_admin(u):
+    hero("Administrasi guru", "Pantau kelengkapan perangkat pembelajaran setiap guru.")
+    gr = qdf("SELECT id, nama FROM users WHERE role='guru' ORDER BY nama")
+    ad = qdf("SELECT guru_id, jenis, status, diperbarui FROM admin_guru")
+    ad = ad[ad.jenis.isin(DOKUMEN_ADMIN)]
+    N, rows = len(DOKUMEN_ADMIN), []
+    for gid, nm in zip(gr.id, gr.nama):
+        s = ad[ad.guru_id == gid]
+        lk, dr = int((s.status == "Lengkap").sum()), int((s.status == "Draf").sum())
+        rows.append((nm, lk, dr, N - lk - dr, f"{pct(lk, N)}%"))
+    rk = pd.DataFrame(rows, columns=["Guru", "Lengkap", "Draf", "Belum ada", "Kelengkapan"])
+    tot = int((ad.status == "Lengkap").sum())
+    kpis([("Kelengkapan rata-rata", f"{pct(tot, N * max(len(gr), 1))}%", f"{len(gr)} guru, {N} dokumen per guru", "g"),
+          ("Dokumen lengkap", tot, "seluruh guru", ""),
+          ("Masih draf", int((ad.status == "Draf").sum()), "perlu dilengkapi", "o")])
+    H(panel("Rekap per guru", tb(rk), True))
+    mat = pd.DataFrame({"Dokumen": DOKUMEN_ADMIN})
+    tanda = {"Lengkap": "✔ Lengkap", "Draf": "… Draf"}
+    for gid, nm in zip(gr.id, gr.nama):
+        peta = dict(ad[ad.guru_id == gid][["jenis", "status"]].values.tolist())
+        mat[nm] = [tanda.get(peta.get(j), "– Belum") for j in DOKUMEN_ADMIN]
+    H(panel("Rincian per dokumen", tb(mat), True))
+
+
 # ══════════════════════════ PORTAL ORANG TUA ══════════════════════════
 def ortu_anak(u):
     if not u["siswa_id"]:
@@ -1290,11 +1526,11 @@ def ortu_nilai(u):
 # ══════════════════════════ ENTRY POINT ══════════════════════════
 PAGES = {
     "guru": {"🏠 Beranda": guru_home, "🕒 Presensi & jurnal": guru_presensi, "📤 Tugas & penilaian": guru_tugas,
-             "📊 Buku nilai": guru_nilai, "✨ Asisten AI": guru_ai},
+             "📊 Buku nilai": guru_nilai, "🗂️ Administrasi guru": guru_admin, "✨ Asisten AI": guru_ai},
     "siswa": {"🏠 Beranda": siswa_home, "📚 Tugas saya": siswa_tugas, "🗓️ Presensi saya": siswa_presensi,
               "🎓 Nilai & rapor": siswa_nilai, "🤖 Tutor AI": siswa_tutor},
     "kepsek": {"🏠 Dashboard": kepsek_home, "🕘 Presensi guru": kepsek_pguru, "👥 Presensi siswa": kepsek_psiswa,
-               "📖 Jurnal mengajar": kepsek_jurnal, "📈 Nilai & tugas": kepsek_nilai},
+               "📖 Jurnal mengajar": kepsek_jurnal, "📈 Nilai & tugas": kepsek_nilai, "🗂️ Administrasi guru": kepsek_admin},
     "ortu": {"🏠 Beranda": ortu_home, "🗓️ Presensi anak": ortu_presensi, "📤 Tugas & pengumpulan": ortu_tugas,
              "🎓 Nilai anak": ortu_nilai},
 }
