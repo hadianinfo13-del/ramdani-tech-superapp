@@ -1,7 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
 from docx import Document
-from gtts import gTTS
+from docx.shared import Pt, Inches, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import pandas as pd
 import numpy as np
 from PIL import Image
@@ -9,9 +10,129 @@ import io
 import time
 import sqlite3
 import os
+from datetime import datetime
 
-# Konfigurasi Halaman
-st.set_page_config(page_title="Asisten Guru - Super App EdTech", layout="wide", initial_sidebar_state="expanded")
+# Konfigurasi Halaman Light Theme
+st.set_page_config(
+    page_title="SPOT Asisten Guru - EdTech Platform",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ------------------------------------------
+# KUSTOM CSS (DESAIN TEMA TERANG & KECE)
+# ------------------------------------------
+st.markdown("""
+<style>
+    /* Reset & Background Utama */
+    .stApp {
+        background-color: #F8FAFC !important;
+        color: #0F172A !important;
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Header & Teks */
+    h1, h2, h3, h4, h5, h6 {
+        color: #1E293B !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Custom Card/Container */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #FFFFFF !important;
+        border-radius: 12px !important;
+        border: 1px solid #E2E8F0 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
+        padding: 18px !important;
+    }
+
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+        border-right: 1px solid #E2E8F0 !important;
+    }
+    
+    /* Primary Buttons */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        padding: 0.5rem 1rem !important;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2) !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background: linear-gradient(135deg, #1D4ED8 0%, #1E40AF 100%) !important;
+        box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3) !important;
+    }
+    
+    /* Secondary Buttons */
+    .stButton > button {
+        border-radius: 8px !important;
+        border: 1px solid #CBD5E1 !important;
+        color: #334155 !important;
+        background-color: #FFFFFF !important;
+        font-weight: 500 !important;
+    }
+    .stButton > button:hover {
+        border-color: #94A3B8 !important;
+        background-color: #F1F5F9 !important;
+    }
+
+    /* Custom Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        border-bottom: 2px solid #E2E8F0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 48px;
+        border-radius: 8px 8px 0 0;
+        padding-left: 16px;
+        padding-right: 16px;
+        color: #64748B;
+        font-weight: 600;
+        background-color: transparent;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #2563EB !important;
+        border-bottom: 3px solid #2563EB !important;
+        background-color: #EFF6FF !important;
+    }
+
+    /* Input Fields */
+    .stTextInput > div > div > input, 
+    .stTextArea > div > div > textarea,
+    .stSelectbox > div > div > div {
+        background-color: #FFFFFF !important;
+        color: #0F172A !important;
+        border: 1px solid #CBD5E1 !important;
+        border-radius: 8px !important;
+    }
+    .stTextInput > div > div > input:focus, 
+    .stTextArea > div > div > textarea:focus {
+        border-color: #2563EB !important;
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+    }
+
+    /* Dataframe / Table */
+    .stDataFrame {
+        border: 1px solid #E2E8F0 !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+    }
+    
+    /* Metrics Box */
+    div[data-testid="stMetric"] {
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
+        padding: 12px 16px !important;
+        border-radius: 10px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # AMBIL API KEY DARI SECRETS
 API_KEY = os.environ.get("GEMINI_API_KEY") 
@@ -20,27 +141,64 @@ if API_KEY:
 else:
     st.error("⚠️ GEMINI_API_KEY belum diatur di Secrets Streamlit Cloud!")
 
-# SISTEM DATABASE
+# ------------------------------------------
+# DATABASE SYSTEM
+# ------------------------------------------
 @st.cache_resource
 def init_db():
     conn = sqlite3.connect('sekolah.db')
     cursor = conn.cursor()
+    
     cursor.execute('CREATE TABLE IF NOT EXISTS nilai_siswa (nama TEXT, harian INTEGER, ujian INTEGER)')
     cursor.execute('CREATE TABLE IF NOT EXISTS users (username TEXT, password TEXT, role TEXT, nama_asli TEXT)')
     
-    cursor.execute("SELECT COUNT(*) FROM nilai_siswa")
-    if cursor.fetchone()[0] == 0:
-        cursor.executemany("INSERT INTO nilai_siswa VALUES (?, ?, ?)", [('Budi', 80, 75), ('Siti', 95, 90), ('Andi', 60, 65)])
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS absensi_mengajar (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tanggal TEXT,
+            mapel TEXT,
+            materi TEXT,
+            hadir INTEGER,
+            sakit INTEGER,
+            izin INTEGER,
+            alpa INTEGER,
+            catatan TEXT
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tugas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            judul_tugas TEXT,
+            deskripsi TEXT,
+            deadline TEXT
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pengumpulan_tugas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tugas_id INTEGER,
+            nama_siswa TEXT,
+            waktu_upload TEXT,
+            nama_file TEXT,
+            status TEXT
+        )
+    ''')
     
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
         users = [
-            ('guru', 'guru123', 'guru', 'Bpk. Ramdani'),
-            ('siswa', 'siswa123', 'siswa', 'Budi'),
-            ('kepsek', 'kepsek123', 'kepsek', 'Ibu Kepsek'),
-            ('ortu', 'ortu123', 'ortu', 'Ortu Budi')
+            ('guru', 'guru123', 'guru', 'Bpk. Ramdani, M.Pd.'),
+            ('siswa', 'siswa123', 'siswa', 'Budi Santoso'),
+            ('kepsek', 'kepsek123', 'kepsek', 'Dra. Hj. Nurhayati'),
+            ('ortu', 'ortu123', 'ortu', 'Orang Tua Budi')
         ]
         cursor.executemany("INSERT INTO users VALUES (?, ?, ?, ?)", users)
+        
+    cursor.execute("SELECT COUNT(*) FROM nilai_siswa")
+    if cursor.fetchone()[0] == 0:
+        cursor.executemany("INSERT INTO nilai_siswa VALUES (?, ?, ?)", [('Budi Santoso', 85, 78), ('Siti Rahma', 95, 92), ('Andi Wijaya', 65, 70)])
     
     conn.commit()
     conn.close()
@@ -61,19 +219,17 @@ def simpan_data_nilai(df):
     conn.close()
     st.cache_data.clear()
 
-# FUNGSIONALITAS MODEL GEMINI AUTOMATIC FALLBACK + DYNAMIC DISCOVERY
+# ------------------------------------------
+# GEMINI AI INTEGRATION
+# ------------------------------------------
 def panggil_gemini(prompt, gambar=None):
-    # Opsi nama model prioritas (Generasi Terbaru hingga Legacy)
     kandidat_model = [
         "gemini-3.8-flash",
         "gemini-3.5-flash",
         "gemini-2.5-flash",
-        "gemini-1.5-flash",
-        "models/gemini-3.8-flash",
-        "models/gemini-3.5-flash"
+        "gemini-1.5-flash"
     ]
     
-    # 1. Coba daftar kandidat utama lebih dulu
     for nama_model in kandidat_model:
         try:
             m = genai.GenerativeModel(nama_model)
@@ -82,12 +238,8 @@ def panggil_gemini(prompt, gambar=None):
         except Exception:
             continue
 
-    # 2. Jika kandidat gagal, temukan model aktif secara otomatis dari API Google
     try:
-        available_models = [
-            m.name for m in genai.list_models() 
-            if 'generateContent' in m.supported_generation_methods
-        ]
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         for nama_model in available_models:
             try:
                 m = genai.GenerativeModel(nama_model)
@@ -96,41 +248,54 @@ def panggil_gemini(prompt, gambar=None):
             except Exception:
                 continue
     except Exception as e:
-        st.error(f"Gagal mengambil daftar model otomatis: {str(e)}")
+        st.error(f"Gagal koneksi AI: {str(e)}")
 
-    st.error("Semua percobaan panggillan model Gemini gagal. Mohon periksa status API Key Anda.")
+    st.error("Koneksi AI gagal. Periksa API Key Anda.")
     return None
 
-# SISTEM ANTI-SPAM
-if 'ai_usage' not in st.session_state:
-    st.session_state.ai_usage = 0
-if 'ai_last' not in st.session_state:
-    st.session_state.ai_last = 0
-
-def cek_izin_ai():
-    if st.session_state.ai_usage >= 15:
-        st.error("🛑 Kuota AI habis untuk sesi ini. Refresh browser Anda.")
-        return False
-    if (time.time() - st.session_state.ai_last) < 5:
-        st.warning("⏳ Mesin AI sedang pendinginan. Tunggu beberapa detik lagi.")
-        return False
-    return True
-
-def catat_penggunaan_ai():
-    st.session_state.ai_usage += 1
-    st.session_state.ai_last = time.time()
-
-# EXPORT DOCX
-def buat_file_word(teks, judul):
+def buat_file_word_rapi(teks, judul):
     doc = Document()
-    doc.add_heading(judul, 0)
-    doc.add_paragraph(teks)
+    for section in doc.sections:
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    title_p = doc.add_paragraph()
+    title_run = title_p.add_run(judul.upper())
+    title_run.font.name = 'Arial'
+    title_run.font.size = Pt(16)
+    title_run.font.bold = True
+    title_run.font.color.rgb = RGBColor(30, 58, 138)
+    
+    sub_p = doc.add_paragraph()
+    sub_run = sub_p.add_run("Dokumen Resmi - SPOT Asisten Guru AI\n" + "─"*50)
+    sub_run.font.name = 'Arial'
+    sub_run.font.size = Pt(9)
+    sub_run.font.italic = True
+    sub_run.font.color.rgb = RGBColor(100, 116, 139)
+
+    for line in teks.split('\n'):
+        if line.strip():
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = Pt(4)
+            p.paragraph_format.line_spacing = 1.15
+            run = p.add_run(line)
+            run.font.name = 'Arial'
+            run.font.size = Pt(10.5)
+            if line.startswith('#') or line.startswith('**'):
+                run.font.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(29, 78, 216)
+
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
     return buf
 
-# AUTENTIKASI
+# ------------------------------------------
+# AUTENTIKASI USER
+# ------------------------------------------
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
@@ -157,149 +322,257 @@ def logout():
     st.rerun()
 
 # ------------------------------------------
-# HALAMAN LOGIN
+# 1. HALAMAN LOGIN (LIGHT & CLEAN)
 # ------------------------------------------
 if not st.session_state.logged_in:
-    st.title("🎓 Portal Login Asisten Guru")
-    col1, col2, col3 = st.columns([1, 2, 1])
+    st.markdown("<br>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.8, 1])
     with col2:
-        st.markdown("### Silakan Masuk")
-        with st.form("form_login"):
-            user_input = st.text_input("Username")
-            pass_input = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Masuk", use_container_width=True)
-            if submit:
-                login(user_input, pass_input)
-        
-        st.info("**Akun Demo:**\n- Guru: `guru` / `guru123`\n- Siswa: `siswa` / `siswa123`\n- Kepsek: `kepsek` / `kepsek123`\n- Ortu: `ortu` / `ortu123`")
+        with st.container(border=True):
+            st.markdown("<h2 style='text-align: center; color: #2563EB;'>🎓 SPOT EdTech</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #64748B;'>Sistem Pembelajaran Terpadu & Asisten AI</p>", unsafe_allow_html=True)
+            st.divider()
+            
+            with st.form("form_login"):
+                user_input = st.text_input("Username", placeholder="Masukkan username Anda")
+                pass_input = st.text_input("Password", type="password", placeholder="••••••••")
+                submit = st.form_submit_button("Masuk Ke Portal", type="primary", use_container_width=True)
+                if submit:
+                    login(user_input, pass_input)
+            
+            st.markdown("""
+            <div style="background-color: #F1F5F9; padding: 12px; border-radius: 8px; margin-top: 15px; font-size: 13px; color: #475569;">
+                <b>🔑 Akun Demo Sistem:</b><br>
+                • Guru: <code>guru</code> / <code>guru123</code><br>
+                • Siswa: <code>siswa</code> / <code>siswa123</code><br>
+                • Kepsek: <code>kepsek</code> / <code>kepsek123</code><br>
+                • Ortu: <code>ortu</code> / <code>ortu123</code>
+            </div>
+            """, unsafe_allow_html=True)
 
 # ------------------------------------------
-# PORTAL GURU
+# 2. PORTAL GURU
 # ------------------------------------------
 elif st.session_state.role == "guru":
-    st.sidebar.title(f"👨‍🏫 Halo, {st.session_state.nama_user}")
-    st.sidebar.button("🚪 Keluar", on_click=logout)
+    st.sidebar.markdown(f"### 👨‍🏫 {st.session_state.nama_user}")
+    st.sidebar.caption("Pengajar / Dosen - SPOT LMS")
+    st.sidebar.markdown("---")
+    st.sidebar.button("🚪 Logout / Keluar", on_click=logout, use_container_width=True)
     
-    st.title("👨‍🏫 Asisten Guru Co-Pilot")
-    tab1, tab2, tab3, tab4 = st.tabs(["📄 Modul Ajar", "📚 Pembuat Soal", "📸 Scan Koreksi AI", "📊 Buku Nilai"])
+    st.title("👨‍🏫 Portal Pengajar SPOT AI")
+    st.markdown("<p style='color: #64748B; margin-top: -15px;'>Kelola perkuliahan, jurnal mengajar, dan tugas siswa dalam satu tempat.</p>", unsafe_allow_html=True)
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📋 Jurnal & Absensi", 
+        "📤 Management Tugas", 
+        "📄 Generator Modul AI", 
+        "📸 Scan Koreksi AI", 
+        "📊 Buku Nilai"
+    ])
 
     with tab1:
-        st.subheader("Generator Administrasi Mengajar")
-        mapel = st.text_input("Materi / Topik:", "Sistem Pencernaan Manusia")
-        if st.button("Generate RPP") and mapel and cek_izin_ai():
-            with st.spinner("Merakit RPP dengan Asisten Guru..."):
-                prompt = f"Anda adalah Asisten Guru. Buatkan RPP Kurikulum Merdeka ringkas untuk topik {mapel}."
-                hasil = panggil_gemini(prompt)
-                if hasil:
-                    st.success("RPP Berhasil Dibuat!")
-                    st.write(hasil)
-                    st.download_button("📥 Unduh RPP (.docx)", buat_file_word(hasil, "RPP"), f"RPP_{mapel}.docx")
-                    catat_penggunaan_ai()
+        st.subheader("📝 Jurnal & Absensi Perkuliahan / Kelas")
+        with st.container(border=True):
+            with st.form("form_absensi"):
+                col1, col2 = st.columns(2)
+                tgl = col1.date_input("Tanggal", datetime.now())
+                mapel_input = col2.text_input("Mata Pelajaran / Kuliah", "Biologi X")
+                materi_input = st.text_input("Materi Pembahasan", "Sistem Pencernaan Manusia")
+                
+                st.markdown("**Rekap Kehadiran Siswa:**")
+                c1, c2, c3, c4 = st.columns(4)
+                h = c1.number_input("Hadir", min_value=0, value=30)
+                s = c2.number_input("Sakit", min_value=0, value=1)
+                i = c3.number_input("Izin", min_value=0, value=0)
+                a = c4.number_input("Alpa", min_value=0, value=0)
+                catatan_input = st.text_area("Catatan Perkuliahan / Kendala", "Siswa sangat antusias saat diskusi kelompok.")
+                
+                if st.form_submit_button("💾 Simpan Jurnal Mengajar", type="primary"):
+                    conn = sqlite3.connect('sekolah.db')
+                    c = conn.cursor()
+                    c.execute("INSERT INTO absensi_mengajar (tanggal, mapel, materi, hadir, sakit, izin, alpa, catatan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                              (str(tgl), mapel_input, materi_input, h, s, i, a, catatan_input))
+                    conn.commit()
+                    conn.close()
+                    st.success("✅ Jurnal Mengajar Berhasil Disimpan!")
+
+        st.subheader("📜 Riwayat Jurnal Mengajar")
+        conn = sqlite3.connect('sekolah.db')
+        df_absen = pd.read_sql_query("SELECT tanggal as Tanggal, mapel as Mapel, materi as 'Materi Pembahasan', hadir as Hadir, sakit as Sakit, izin as Izin, alpa as Alpa FROM absensi_mengajar ORDER BY id DESC", conn)
+        conn.close()
+        st.dataframe(df_absen, use_container_width=True)
 
     with tab2:
-        st.subheader("Pembuat Soal Otomatis")
-        topik_soal = st.text_input("Topik Soal:", "Hukum Newton")
-        tingkat = st.selectbox("Tingkat Kesulitan:", ["Mudah", "Sedang", "HOTS (Sulit)"])
-        if st.button("Buat 5 Soal") and cek_izin_ai():
-            with st.spinner("Membuat soal..."):
-                prompt = f"Anda adalah Asisten Guru. Buatkan 5 soal pilihan ganda tentang {topik_soal} dengan tingkat {tingkat}, lengkap dengan kunci jawaban."
-                hasil = panggil_gemini(prompt)
-                if hasil:
-                    st.write(hasil)
-                    catat_penggunaan_ai()
+        st.subheader("📢 Buat Penugasan Baru")
+        with st.container(border=True):
+            with st.form("form_tugas"):
+                j_tugas = st.text_input("Judul Tugas", "Tugas 1: Analisis Organ Pencernaan")
+                d_tugas = st.text_area("Instruksi / Detail Tugas", "Buatlah rangkuman materi dalam bentuk PDF minimal 2 halaman.")
+                dl_tugas = st.date_input("Deadline Pengumpulan")
+                if st.form_submit_button("🚀 Terbitkan Tugas", type="primary"):
+                    conn = sqlite3.connect('sekolah.db')
+                    c = conn.cursor()
+                    c.execute("INSERT INTO tugas (judul_tugas, deskripsi, deadline) VALUES (?, ?, ?)", (j_tugas, d_tugas, str(dl_tugas)))
+                    conn.commit()
+                    conn.close()
+                    st.success("Tugas berhasil diterbitkan ke siswa!")
+
+        st.subheader("📥 Daftar Tugas Terkumpul")
+        conn = sqlite3.connect('sekolah.db')
+        df_kumpul = pd.read_sql_query('''
+            SELECT p.nama_siswa as 'Nama Siswa', t.judul_tugas as 'Judul Tugas', p.waktu_upload as 'Waktu Upload', p.nama_file as 'Nama Berkas', p.status as Status 
+            FROM pengumpulan_tugas p 
+            JOIN tugas t ON p.tugas_id = t.id 
+            ORDER BY p.id DESC
+        ''', conn)
+        conn.close()
+        st.dataframe(df_kumpul, use_container_width=True)
 
     with tab3:
-        st.subheader("📸 Koreksi Tugas dengan AI Vision")
-        st.write("Unggah foto jawaban siswa. AI akan membaca dan mengevaluasinya.")
-        file_foto = st.file_uploader("Upload Foto", type=["jpg", "png", "jpeg"])
-        if file_foto is not None:
-            img = Image.open(file_foto)
-            st.image(img, caption="Foto Tugas Siswa", width=300)
-            if st.button("Koreksi Gambar Ini") and cek_izin_ai():
-                with st.spinner("Menganalisis tulisan..."):
-                    prompt = "Anda adalah Asisten Guru. Tolong transkrip tulisan di gambar ini, lalu beri nilai 1-100 dan umpan balik singkat."
-                    hasil = panggil_gemini(prompt, gambar=img)
-                    if hasil:
-                        st.write(hasil)
-                        catat_penggunaan_ai()
+        st.subheader("📄 Generator RPP / Modul Ajar AI")
+        mapel_rpp = st.text_input("Topik Pembelajaran:", "Fotosintesis pada Tumbuhan")
+        if st.button("Generate RPP AI", type="primary") and mapel_rpp:
+            with st.spinner("Merakit RPP dengan AI..."):
+                prompt = f"Buatkan RPP Kurikulum Merdeka ringkas, rapi, dan terstruktur untuk topik {mapel_rpp}."
+                hasil = panggil_gemini(prompt)
+                if hasil:
+                    st.success("✨ RPP Berhasil Dibuat!")
+                    with st.container(border=True):
+                        st.markdown(hasil)
+                        file_word = buat_file_word_rapi(hasil, f"RPP - {mapel_rpp}")
+                        st.download_button("📄 Unduh Dokumen (.docx)", file_word, f"RPP_{mapel_rpp}.docx", use_container_width=True)
 
     with tab4:
-        st.subheader("Buku Nilai Permanen")
+        st.subheader("📸 Scan & Koreksi Tugas AI Vision")
+        file_foto = st.file_uploader("Upload Foto Lembar Jawaban Siswa", type=["jpg", "png", "jpeg"])
+        if file_foto:
+            img = Image.open(file_foto)
+            st.image(img, caption="Preview Jawaban Siswa", width=350)
+            if st.button("Koreksi Lembar Jawaban Ini", type="primary"):
+                with st.spinner("Menganalisis tulisan..."):
+                    prompt = "Tolong transkrip tulisan tangan di gambar ini, berikan penilaian (1-100) serta analisis kesalahan secara mendalam."
+                    hasil = panggil_gemini(prompt, gambar=img)
+                    if hasil:
+                        with st.container(border=True):
+                            st.markdown(hasil)
+
+    with tab5:
+        st.subheader("📊 Buku Nilai Terintegrasi")
         df_edit = st.data_editor(load_data_nilai(), num_rows="dynamic", use_container_width=True)
-        if st.button("💾 Simpan Perubahan", type="primary"):
+        if st.button("💾 Simpan Perubahan Nilai", type="primary"):
             simpan_data_nilai(df_edit)
-            st.success("Tersimpan ke Database!")
+            st.success("Buku Nilai Berhasil Diperbarui!")
 
 # ------------------------------------------
-# PORTAL SISWA
+# 3. PORTAL SISWA
 # ------------------------------------------
 elif st.session_state.role == "siswa":
-    st.sidebar.title(f"👨‍🎓 Halo, {st.session_state.nama_user}")
-    st.sidebar.button("🚪 Keluar", on_click=logout)
+    st.sidebar.markdown(f"### 👨‍🎓 {st.session_state.nama_user}")
+    st.sidebar.caption("Siswa / Mahasiswa")
+    st.sidebar.markdown("---")
+    st.sidebar.button("🚪 Logout / Keluar", on_click=logout, use_container_width=True)
     
-    st.title("👋 Ruang Belajar - Asisten Guru")
-    st.subheader("🤖 Tanya AI Tutor")
-    tanya = st.text_input("Ada materi yang belum kamu pahami?")
-    if st.button("Tanya") and tanya and cek_izin_ai():
-        with st.spinner("Tutor berpikir..."):
-            prompt = f"Anda adalah Asisten Guru. Jelaskan materi berikut kepada siswa SMP dengan bahasa ramah dan mudah dipahami: {tanya}"
-            hasil = panggil_gemini(prompt)
-            if hasil:
-                st.info(hasil)
-                catat_penggunaan_ai()
+    st.title("🎓 Portal Belajar SPOT - Siswa")
+    tab_s1, tab_s2 = st.tabs(["📤 Upload & Pengumpulan Tugas", "🤖 AI Tutor Personal"])
 
-# ------------------------------------------
-# PORTAL KEPALA SEKOLAH
-# ------------------------------------------
-elif st.session_state.role == "kepsek":
-    st.sidebar.title(f"👔 {st.session_state.nama_user}")
-    st.sidebar.button("🚪 Keluar", on_click=logout)
-    
-    st.title("📊 Dasbor Kepala Sekolah (Real-Time)")
-    conn = sqlite3.connect('sekolah.db')
-    df_kepsek = pd.read_sql_query("SELECT * FROM nilai_siswa", conn)
-    conn.close()
-
-    total_siswa = len(df_kepsek)
-    rata_harian = df_kepsek['harian'].mean() if total_siswa > 0 else 0
-    rata_ujian = df_kepsek['ujian'].mean() if total_siswa > 0 else 0
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Siswa", f"{total_siswa} Anak")
-    col2.metric("Rata-rata Nilai Harian", f"{rata_harian:.1f}")
-    col3.metric("Rata-rata Ujian", f"{rata_ujian:.1f}")
-    
-    st.divider()
-    st.write("📈 Grafik Distribusi Nilai Harian")
-    if total_siswa > 0:
-        st.bar_chart(df_kepsek.set_index('nama')['harian'])
-
-# ------------------------------------------
-# PORTAL ORANG TUA
-# ------------------------------------------
-elif st.session_state.role == "ortu":
-    st.sidebar.title(f"👨‍👩‍👧 {st.session_state.nama_user}")
-    st.sidebar.button("🚪 Keluar", on_click=logout)
-    
-    st.title("👨‍👩‍👧 Pantau Nilai Anak")
-    nama_anak = st.text_input("🔍 Masukkan Nama Anak (contoh: Budi):")
-    
-    if st.button("Cari Data"):
+    with tab_s1:
+        st.subheader("📢 Daftar Tugas Aktif")
         conn = sqlite3.connect('sekolah.db')
-        df_ortu = pd.read_sql_query(f"SELECT * FROM nilai_siswa WHERE nama='{nama_anak}'", conn)
+        c = conn.cursor()
+        c.execute("SELECT id, judul_tugas, deskripsi, deadline FROM tugas ORDER BY id DESC")
+        daftar_tugas = c.fetchall()
         conn.close()
 
-        if not df_ortu.empty:
-            nilai_h = df_ortu.iloc[0]['harian']
-            nilai_u = df_ortu.iloc[0]['ujian']
-            st.success(f"Data ditemukan untuk: **{nama_anak}**")
-            col1, col2 = st.columns(2)
-            col1.metric("Nilai Harian", nilai_h)
-            col2.metric("Nilai Ujian", nilai_u)
-            
-            if nilai_h >= 75:
-                st.info("Pesan Wali Kelas: Nilai anak Anda sudah baik, pertahankan!")
-            else:
-                st.warning("Pesan Wali Kelas: Anak Anda butuh bimbingan belajar tambahan di rumah.")
+        if daftar_tugas:
+            for t_id, j_tugas, d_tugas, dl_tugas in daftar_tugas:
+                with st.container(border=True):
+                    st.markdown(f"#### 📌 {j_tugas}")
+                    st.markdown(f"**Deadline:** `{dl_tugas}`")
+                    st.write(f"**Instruksi:** {d_tugas}")
+                    
+                    file_upload = st.file_uploader(f"Unggah Berkas Tugas", type=["pdf", "docx", "png", "jpg"], key=f"file_{t_id}")
+                    if st.button("📤 Kirim Tugas", key=f"btn_{t_id}", type="primary"):
+                        if file_upload:
+                            waktu_sekarang = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            conn = sqlite3.connect('sekolah.db')
+                            cur = conn.cursor()
+                            cur.execute("INSERT INTO pengumpulan_tugas (tugas_id, nama_siswa, waktu_upload, nama_file, status) VALUES (?, ?, ?, ?, ?)",
+                                        (t_id, st.session_state.nama_user, waktu_sekarang, file_upload.name, "Terkirim Tepat Waktu"))
+                            conn.commit()
+                            conn.close()
+                            st.success(f"✅ File '{file_upload.name}' berhasil dikirim!")
+                        else:
+                            st.warning("Pilih file terlebih dahulu.")
         else:
-            st.error("Data tidak ditemukan. Pastikan ejaan nama sesuai buku absen.")
+            st.info("Belum ada tugas aktif dari pengajar.")
+
+    with tab_s2:
+        st.subheader("🤖 Asisten Belajar AI")
+        tanya = st.text_input("Tanyakan materi yang ingin kamu pelajari:")
+        if st.button("Tanya AI", type="primary") and tanya:
+            with st.spinner("Mencari jawaban..."):
+                prompt = f"Jelaskan materi berikut secara ramah dan mudah dipahami oleh siswa: {tanya}"
+                hasil = panggil_gemini(prompt)
+                if hasil:
+                    with st.container(border=True):
+                        st.markdown(hasil)
+
+# ------------------------------------------
+# 4. PORTAL KEPALA SEKOLAH
+# ------------------------------------------
+elif st.session_state.role == "kepsek":
+    st.sidebar.markdown(f"### 👔 {st.session_state.nama_user}")
+    st.sidebar.caption("Kepala Sekolah / Dekan")
+    st.sidebar.markdown("---")
+    st.sidebar.button("🚪 Logout / Keluar", on_click=logout, use_container_width=True)
+    
+    st.title("📊 Executive Dashboard Monitoring")
+    
+    st.subheader("📌 Monitoring Jurnal Mengajar Guru")
+    conn = sqlite3.connect('sekolah.db')
+    df_jurnal_k = pd.read_sql_query("SELECT tanggal as Tanggal, mapel as Mapel, materi as 'Materi Pembahasan', hadir as Hadir, sakit as Sakit, izin as Izin, alpa as Alpa FROM absensi_mengajar", conn)
+    conn.close()
+    st.dataframe(df_jurnal_k, use_container_width=True)
+
+    st.divider()
+    st.subheader("📈 Rekap Rata-Rata Nilai Akademik")
+    conn = sqlite3.connect('sekolah.db')
+    df_k = pd.read_sql_query("SELECT * FROM nilai_siswa", conn)
+    conn.close()
+    if not df_k.empty:
+        col1, col2 = st.columns(2)
+        col1.metric("Rata-rata Nilai Harian", f"{df_k['harian'].mean():.1f}")
+        col2.metric("Rata-rata Nilai Ujian", f"{df_k['ujian'].mean():.1f}")
+        st.bar_chart(df_k.set_index('nama')['harian'])
+
+# ------------------------------------------
+# 5. PORTAL ORANG TUA
+# ------------------------------------------
+elif st.session_state.role == "ortu":
+    st.sidebar.markdown(f"### 👨‍👩‍👧 {st.session_state.nama_user}")
+    st.sidebar.caption("Wali Murid / Orang Tua")
+    st.sidebar.markdown("---")
+    st.sidebar.button("🚪 Logout / Keluar", on_click=logout, use_container_width=True)
+    
+    st.title("👨‍👩‍👧 Portal Monitoring Perkembangan Anak")
+    nama_anak = st.text_input("🔍 Masukkan Nama Lengkap Anak:", "Budi Santoso")
+    
+    if st.button("Cari Laporan Anak", type="primary"):
+        conn = sqlite3.connect('sekolah.db')
+        df_o = pd.read_sql_query(f"SELECT * FROM nilai_siswa WHERE nama='{nama_anak}'", conn)
+        df_t = pd.read_sql_query(f"SELECT t.judul_tugas, p.waktu_upload, p.status FROM pengumpulan_tugas p JOIN tugas t ON p.tugas_id = t.id WHERE p.nama_siswa='{nama_anak}'", conn)
+        conn.close()
+
+        if not df_o.empty:
+            st.success(f"Laporan Akademik: **{nama_anak}**")
+            col1, col2 = st.columns(2)
+            col1.metric("Nilai Tugas Harian", df_o.iloc[0]['harian'])
+            col2.metric("Nilai Ujian", df_o.iloc[0]['ujian'])
+            
+            st.subheader("📌 Riwayat Pengumpulan Tugas Anak")
+            if not df_t.empty:
+                st.dataframe(df_t, use_container_width=True)
+            else:
+                st.info("Belum ada catatan tugas yang dikumpulkan.")
+        else:
+            st.error("Data siswa tidak ditemukan. Pastikan nama lengkap sesuai.")
