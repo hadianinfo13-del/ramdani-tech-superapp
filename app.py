@@ -9,7 +9,7 @@ import io
 import time
 import sqlite3
 import os
-​--- Konfigurasi Halaman ---
+#​--- Konfigurasi Halaman ---
 ​st.set_page_config(page_title="Ramdani Tech - Super App EdTech", layout="wide", initial_sidebar_state="expanded")
 ​--- AMBIL API KEY DARI SECRETS ---
 ​API_KEY = os.environ.get("GEMINI_API_KEY")
