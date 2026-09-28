@@ -1,7 +1,6 @@
-streamlit
-google-generativeai
-python-docx
-gTTS
+streamlit>=1.40
 pandas
-numpy
-Pillow
+python-docx
+pillow
+google-generativeai
+streamlit-geolocation
