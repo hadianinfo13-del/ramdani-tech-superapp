@@ -61,29 +61,44 @@ def simpan_data_nilai(df):
     conn.close()
     st.cache_data.clear()
 
-# FUNGSIONALITAS MODEL GEMINI MULTI-FALLBACK
+# FUNGSIONALITAS MODEL GEMINI AUTOMATIC FALLBACK + DYNAMIC DISCOVERY
 def panggil_gemini(prompt, gambar=None):
-    # Urutan model Gemini yang valid dan aktif saat ini
+    # Opsi nama model prioritas (Generasi Terbaru hingga Legacy)
     kandidat_model = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash",
         "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-2.0-flash"
+        "models/gemini-3.8-flash",
+        "models/gemini-3.5-flash"
     ]
     
-    error_terakhir = ""
+    # 1. Coba daftar kandidat utama lebih dulu
     for nama_model in kandidat_model:
         try:
             m = genai.GenerativeModel(nama_model)
-            if gambar:
-                res = m.generate_content([prompt, gambar])
-            else:
-                res = m.generate_content(prompt)
+            res = m.generate_content([prompt, gambar] if gambar else prompt)
             return res.text
-        except Exception as e:
-            error_terakhir = str(e)
+        except Exception:
             continue
-            
-    st.error(f"Gagal memanggil AI. Detail error: {error_terakhir}")
+
+    # 2. Jika kandidat gagal, temukan model aktif secara otomatis dari API Google
+    try:
+        available_models = [
+            m.name for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        for nama_model in available_models:
+            try:
+                m = genai.GenerativeModel(nama_model)
+                res = m.generate_content([prompt, gambar] if gambar else prompt)
+                return res.text
+            except Exception:
+                continue
+    except Exception as e:
+        st.error(f"Gagal mengambil daftar model otomatis: {str(e)}")
+
+    st.error("Semua percobaan panggillan model Gemini gagal. Mohon periksa status API Key Anda.")
     return None
 
 # SISTEM ANTI-SPAM
