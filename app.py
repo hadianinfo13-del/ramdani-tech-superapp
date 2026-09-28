@@ -785,13 +785,28 @@ PANDUAN = {
 def panduan_login():
     st.markdown("### Panduan penggunaan")
     st.caption("Pilih peran Anda untuk melihat menu dan cara memakainya. Akun diberikan oleh sekolah.")
-    tabs = st.tabs(list(PANDUAN))
+    tabs = st.tabs(list(PANDUAN) + ["🕒 Cara absen"])
     for tab, (peran, (desc, menu, langkah)) in zip(tabs, PANDUAN.items()):
         with tab:
             H(panel(peran, f"<p style='margin:0'>{esc(desc)}</p>"))
             H(panel("Menu yang tersedia", tb(pd.DataFrame(menu, columns=["Menu", "Fungsi"])), True))
             H(panel("Langkah singkat", "<ol style='margin:0;padding-left:1.2rem'>"
                     + "".join(f"<li>{esc(x)}</li>" for x in langkah) + "</ol>"))
+    with tabs[-1]:
+        ol = "<ol style='margin:0;padding-left:1.2rem'>"
+        H(panel("Absen guru (diisi guru sendiri)", ol
+                + "<li>Buka menu <b>Presensi &amp; jurnal</b>, tab <b>Presensi saya</b>.</li>"
+                f"<li>Tekan <b>Presensi masuk</b> saat tiba (lewat {BATAS_MASUK} dicatat Terlambat).</li>"
+                "<li>Tekan <b>Presensi pulang</b> saat pulang.</li>"
+                "<li>Bila tidak hadir, isi <b>Tidak dapat hadir?</b> (Sakit atau Izin) lalu <b>Kirim keterangan</b>.</li></ol>"))
+        H(panel("Absen siswa (diisi guru setelah mengajar)", ol
+                + "<li>Buka menu <b>Presensi &amp; jurnal</b>, tab <b>Jurnal &amp; presensi siswa</b>.</li>"
+                "<li>Pilih kelas dan mata pelajaran, isi tanggal dan materi.</li>"
+                "<li>Semua siswa awalnya Hadir. Ubah status siswa yang Sakit, Izin, atau Alpa.</li>"
+                "<li>Tekan <b>Simpan jurnal dan presensi</b>.</li></ol>"))
+        H(panel("Melihat hasil absen", ol
+                + "<li><b>Siswa</b>: menu Presensi saya.</li><li><b>Orang tua</b>: menu Presensi anak.</li>"
+                "<li><b>Kepala sekolah</b>: menu Presensi guru dan Presensi siswa.</li></ol>"))
 
 
 def halaman_login():
@@ -835,6 +850,11 @@ def guru_presensi(u):
     g, hi = u["id"], today().isoformat()
     opsi_mp = [m for m, gu in MP if gu == u["username"]] or [m for m, _ in MP]
     with t1:
+        note("info", "<b>Cara absen guru:</b><ol style='margin:6px 0 0;padding-left:1.2rem'>"
+                     "<li>Sampai di sekolah, tekan tombol <b>Presensi masuk</b> (lewat pukul " + BATAS_MASUK + " dicatat Terlambat).</li>"
+                     "<li>Sebelum pulang, tekan tombol <b>Presensi pulang</b>.</li>"
+                     "<li>Kalau tidak bisa hadir, isi kotak <b>Tidak dapat hadir?</b> di sebelah kanan, pilih Sakit atau Izin, "
+                     "tulis keterangan, lalu tekan <b>Kirim keterangan</b>.</li></ol>")
         pr = one("SELECT status, jam_masuk, jam_pulang FROM presensi_guru WHERE guru_id=? AND tanggal=?", (g, hi))
         a, b = st.columns(2)
         with a:
@@ -866,6 +886,12 @@ def guru_presensi(u):
                         flash("Keterangan ketidakhadiran tersimpan.")
                         st.rerun()
     with t2:
+        note("info", "<b>Cara mengabsen siswa:</b><ol style='margin:6px 0 0;padding-left:1.2rem'>"
+                     "<li>Pilih <b>Kelas</b> dan <b>Mata pelajaran</b>.</li>"
+                     "<li>Isi <b>Tanggal</b> dan <b>Materi pembahasan</b>.</li>"
+                     "<li>Di tabel, semua siswa awalnya <b>Hadir</b>. Ketuk kolom <b>Status</b> siswa yang tidak hadir, "
+                     "lalu pilih Sakit, Izin, atau Alpa.</li>"
+                     "<li>Tekan <b>Simpan jurnal dan presensi</b> di bagian bawah.</li></ol>")
         c1, c2 = st.columns(2)
         kelas, mapel = c1.selectbox("Kelas", KELAS), c2.selectbox("Mata pelajaran", opsi_mp)
         sw = qdf("SELECT id, nis, nama FROM siswa WHERE kelas=? ORDER BY nama", (kelas,))
@@ -1238,6 +1264,7 @@ def siswa_tugas(u):
 
 def siswa_presensi(u):
     hero("Presensi saya", "Rekap kehadiran per mata pelajaran dan riwayat tiap pertemuan.")
+    note("info", "Siswa tidak absen sendiri. Kehadiran dicatat oleh guru setiap selesai pelajaran, lalu tampil di halaman ini.")
     blok_presensi(u["siswa_id"])
 
 
@@ -1507,6 +1534,7 @@ def ortu_home(u):
 
 def ortu_presensi(u):
     hero("Presensi anak", "Kehadiran anak pada setiap pertemuan dan rekap per mata pelajaran.")
+    note("info", "Kehadiran anak dicatat oleh guru setiap selesai pelajaran. Anda cukup melihat hasilnya di halaman ini.")
     if ortu_anak(u):
         blok_presensi(u["siswa_id"])
 
