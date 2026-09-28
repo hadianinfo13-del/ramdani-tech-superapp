@@ -9,15 +9,15 @@ import io
 import time
 import sqlite3
 import os
-​--- Konfigurasi Halaman ---
+​Konfigurasi Halaman
 ​st.set_page_config(page_title="Ramdani Tech - Super App EdTech", layout="wide", initial_sidebar_state="expanded")
-​--- AMBIL API KEY DARI SECRETS ---
+​AMBIL API KEY DARI SECRETS
 ​API_KEY = os.environ.get("GEMINI_API_KEY")
 if API_KEY:
 genai.configure(api_key=API_KEY)
 else:
 st.error("⚠️ GEMINI_API_KEY belum diatur di Secrets Streamlit Cloud!")
-​--- FUNGSI GENERATE AI DENGAN AUTOMATIC MODEL FALLBACK & DISCOVERY ---
+​FUNGSI GENERATE AI DENGAN AUTOMATIC MODEL FALLBACK & DISCOVERY
 ​def panggil_gemini_ai(prompt_atau_isi):
 """
 Mencari model Gemini yang tersedia secara otomatis atau menguji kandidat model
@@ -55,7 +55,7 @@ except Exception as e:
 terakhir_error = e
 continue
 ​raise RuntimeError(f"Gagal memanggil model Gemini. Error terakhir: {terakhir_error}")
-​--- SISTEM DATABASE (SQLITE WITH CACHING FOR SPEED) ---
+​SISTEM DATABASE (SQLITE WITH CACHING FOR SPEED)
 ​@st.cache_resource
 def init_db():
 conn = sqlite3.connect('sekolah.db')
@@ -89,7 +89,7 @@ df_sql = df.rename(columns={'Nama Siswa': 'nama', 'Harian': 'harian', 'Ujian': '
 df_sql.to_sql('nilai_siswa', conn, if_exists='replace', index=False)
 conn.close()
 st.cache_data.clear()
-​--- SISTEM REHAT (ANTI-SPAM / COOLDOWN) ---
+​SISTEM REHAT (ANTI-SPAM / COOLDOWN)
 ​if 'ai_usage' not in st.session_state:
 st.session_state.ai_usage = 0
 if 'ai_last' not in st.session_state:
@@ -105,7 +105,7 @@ return True
 ​def catat_penggunaan_ai():
 st.session_state.ai_usage += 1
 st.session_state.ai_last = time.time()
-​--- FUNGSI EXPORT DOKUMEN ---
+​FUNGSI EXPORT DOKUMEN
 ​def buat_file_word(teks, judul):
 doc = Document()
 doc.add_heading(judul, 0)
@@ -114,7 +114,7 @@ buf = io.BytesIO()
 doc.save(buf)
 buf.seek(0)
 return buf
-​--- SISTEM LOGIN & AUTENTIKASI ---
+​SISTEM LOGIN & AUTENTIKASI
 ​if 'logged_in' not in st.session_state:
 st.session_state.logged_in = False
 st.session_state.role = None
