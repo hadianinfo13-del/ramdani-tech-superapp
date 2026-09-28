@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SPOT Asisten Guru
+LMS SMP Negeri 1 Cijambe
 Sistem pembelajaran online terpadu dan portal akademik sekolah.
 Peran: guru, siswa, kepala sekolah, orang tua.
 Stack: Streamlit, SQLite, Google Gemini.
@@ -28,11 +28,11 @@ try:
 except Exception:  # paket belum terpasang
     genai = None
 
-st.set_page_config(page_title="SPOT Asisten Guru", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="LMS SMP Negeri 1 Cijambe", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
 
 # ══════════════════════════ KONFIGURASI ══════════════════════════
-NAMA_SEKOLAH = "SMP Nusantara Cerdas"  # ganti sesuai sekolah Anda
-DB_PATH = os.environ.get("SPOT_DB", "spot_v2.db")
+NAMA_SEKOLAH = "SMP Negeri 1 Cijambe"
+DB_PATH = os.environ.get("SPOT_DB", "spot_v2.db")  # nama tidak diubah agar data lama tetap terbaca
 WIB = timezone(timedelta(hours=7))
 BATAS_MASUK = "07:15"  # presensi guru setelah jam ini dicatat Terlambat
 KELAS = ["VIII-A", "VIII-B"]
@@ -114,6 +114,7 @@ def initials(nama):
 
 
 def hpw(username, pw):
+    # salt jangan diubah, agar password lama tetap valid
     return hashlib.pbkdf2_hmac("sha256", pw.encode(), f"spot:{username}".encode(), 60000).hex()
 
 
@@ -175,7 +176,7 @@ section[data-testid="stSidebar"] .stButton>button[kind="primary"],section[data-t
 .bd.ok{background:#DCFCE7;color:#166534}.bd.warn{background:#FEF3C7;color:#92400E}.bd.info{background:#DBEAFE;color:#1E40AF}.bd.bad{background:#FEE2E2;color:#991B1B}.bd.gray{background:#E2E8F0;color:#334155}
 .ann{border-left:3px solid var(--gold);padding:2px 0 2px 12px;margin-bottom:12px}
 .ann small{color:var(--mu)}.ann b{display:block;color:var(--navy)}.ann p{margin:2px 0 0;font-size:.86rem;color:#475569}
-/* kartu mata pelajaran ala SPOT */
+/* kartu mata pelajaran */
 .courses{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin-bottom:18px}
 .course{background:#fff;border:1px solid var(--line);border-radius:4px;overflow:hidden}
 .cband{height:62px;display:flex;align-items:center;padding:0 14px;font-size:1.6rem;background:var(--blue)}
@@ -623,7 +624,7 @@ def sidebar(u):
     if aktif not in menu:
         aktif = st.session_state["menu"] = menu[0]
     with st.sidebar:
-        H('<div class="sb-brand"><div class="logo">🎓</div><div><b>SPOT</b><span>Asisten Guru</span></div></div>')
+        H(f'<div class="sb-brand"><div class="logo">🎓</div><div><b>LMS</b><span>{esc(NAMA_SEKOLAH)}</span></div></div>')
         H(f'<div class="sb-user"><div class="av">{esc(initials(u["nama"]))}</div>'
           f'<div><b>{esc(u["nama"])}</b><span>{ROLE[u["role"]]}</span></div></div>')
         for m in menu:
@@ -638,7 +639,7 @@ def sidebar(u):
 def halaman_login():
     a, b = st.columns([1.15, 1], gap="large")
     with a:
-        H(f'<div class="lg"><div class="logo">🎓</div><h2>SPOT Asisten Guru</h2>'
+        H(f'<div class="lg"><div class="logo">🎓</div><h2>LMS {esc(NAMA_SEKOLAH)}</h2>'
           f'<p>Sistem pembelajaran online terpadu {esc(NAMA_SEKOLAH)}.</p><ul>'
           '<li>Presensi guru dan siswa tercatat langsung di sistem</li>'
           '<li>Tugas diunggah, dinilai, dan diberi umpan balik di satu tempat</li>'
