@@ -29,6 +29,12 @@ except Exception:  # paket belum terpasang
     genai = None
 
 st.set_page_config(page_title="LMS SMP Negeri 1 Cijambe", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
+try:  # cadangan bila .streamlit/config.toml belum dipasang
+    for _k, _v in {"base": "light", "primaryColor": "#1B4F9C", "backgroundColor": "#F3F5F9",
+                   "secondaryBackgroundColor": "#FFFFFF", "textColor": "#1B2A41"}.items():
+        st._config.set_option(f"theme.{_k}", _v)
+except Exception:
+    pass
 
 # ══════════════════════════ KONFIGURASI ══════════════════════════
 NAMA_SEKOLAH = "SMP Negeri 1 Cijambe"
@@ -223,6 +229,31 @@ div[class*="st-key-card"]{background:#fff;border:1px solid var(--line);border-ra
 /* menu atas: tampil di HP, disembunyikan di layar lebar karena sudah ada sidebar */
 .st-key-topnav{background:#fff;border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:4px;padding:8px 12px;margin-bottom:14px}
 .st-key-topnav [role="radiogroup"]{gap:6px 14px;flex-wrap:wrap}
+/* kotak isian, unggah berkas, dan tombol: paksa terang */
+[data-baseweb="input"],[data-baseweb="base-input"],[data-baseweb="textarea"],[data-baseweb="select"]>div,[data-testid="stNumberInput"] div[data-baseweb="input"],[data-testid="stDateInput"] div[data-baseweb="input"]{background:#fff!important;border-color:var(--line)!important}
+.stApp input,.stApp textarea{background:#fff!important;color:var(--tx)!important;-webkit-text-fill-color:var(--tx)!important;caret-color:var(--tx)}
+.stApp input::placeholder,.stApp textarea::placeholder{color:#8493A8!important;-webkit-text-fill-color:#8493A8!important}
+[data-testid="stNumberInput"] button,[data-testid="stNumberInputStepUp"],[data-testid="stNumberInputStepDown"]{background:#EEF3FA!important;color:var(--navy)!important}
+[data-testid="stNumberInput"] button *{color:var(--navy)!important;fill:var(--navy)!important}
+[data-testid="stFileUploaderDropzone"]{background:#F6F9FD!important;border:1px dashed #9DB0CB!important}
+[data-testid="stFileUploaderDropzone"] *{color:var(--tx)!important}
+[data-testid="stFileUploaderDropzone"] button{background:#fff!important;border:1px solid var(--blue)!important}
+[data-testid="stFileUploaderDropzone"] button *{color:var(--blue)!important}
+[data-testid="stFileUploader"] [data-testid="stFileUploaderFile"],[data-testid="stFileUploader"] section+div{background:#fff!important}
+[data-testid="stFileUploader"] small,[data-testid="stFileUploader"] span{color:var(--tx)!important}
+.block-container [data-testid="stBaseButton-secondary"],.block-container [data-testid="stBaseButton-secondaryFormSubmit"],.block-container .stDownloadButton>button{background:#fff!important;color:var(--navy)!important;border:1px solid #9DB0CB!important}
+.block-container [data-testid="stBaseButton-secondary"] *,.block-container [data-testid="stBaseButton-secondaryFormSubmit"] *,.block-container .stDownloadButton>button *{color:var(--navy)!important}
+.block-container [data-testid="stBaseButton-primary"],.block-container [data-testid="stBaseButton-primaryFormSubmit"],.block-container .stDownloadButton>button[kind="primary"],.block-container [data-testid="stFormSubmitButton"]>button[kind="primary"]{background:var(--blue)!important;color:#fff!important;border:1px solid var(--blue)!important}
+.block-container [data-testid="stBaseButton-primary"] *,.block-container [data-testid="stBaseButton-primaryFormSubmit"] *,.block-container .stDownloadButton>button[kind="primary"] *,.block-container [data-testid="stFormSubmitButton"]>button[kind="primary"] *{color:#fff!important}
+.block-container button:hover{filter:brightness(.96)}
+[data-baseweb="calendar"],[data-baseweb="calendar"] *,[data-baseweb="popover"] ul,[data-baseweb="popover"] li,[role="listbox"],[role="listbox"] li{background-color:#fff!important;color:var(--tx)!important}
+[role="option"][aria-selected="true"],[data-baseweb="popover"] li:hover{background-color:#E8EEF7!important}
+[data-baseweb="radio"] div,[data-baseweb="checkbox"] div,.stRadio label,.stRadio p{color:var(--tx)!important}
+[data-testid="stAlert"] *{color:inherit}
+[data-testid="stChatInput"],[data-testid="stChatInput"] textarea{background:#fff!important;color:var(--tx)!important}
+[data-testid="stChatMessage"]{background:#fff;border:1px solid var(--line);border-radius:4px}
+[data-testid="stChatMessage"] *{color:var(--tx)}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"]{color-scheme:light;background:#fff}
 @media(min-width:0px){.st-key-topnav{display:block}}
 section[data-testid="stSidebar"] .stButton>button,section[data-testid="stSidebar"] .stButton>button *{color:#DCE6F5!important}
 section[data-testid="stSidebar"] .stButton>button[kind="primary"],section[data-testid="stSidebar"] .stButton>button[kind="primary"] *{color:#fff!important}
